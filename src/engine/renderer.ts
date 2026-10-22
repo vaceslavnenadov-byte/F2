@@ -173,7 +173,7 @@ export class Renderer {
   }
 
   /** Время суток в часах (0..24): положение солнца, цвет света, туман, звёзды. */
-  setTime(hour: number) {
+  setTime(hour: number, nightAmbient = 0) {
     const t = (hour - 5) / 15;
     const elev = Math.sin(t * Math.PI) * 62;
     const az = THREE.MathUtils.degToRad(110 + 180 * t);
@@ -197,7 +197,7 @@ export class Renderer {
       this.sun.color.set(0x8aa4ff);
       this.sun.intensity = 0.8 * THREE.MathUtils.smoothstep(-elev, 2, 12);
     }
-    this.hemi.intensity = 0.3 + 0.6 * day;
+    this.hemi.intensity = 0.3 + 0.6 * day + nightAmbient * this.night;
     this.hemi.color.set(0x34446e).lerp(new THREE.Color(0xb9cde8), day);
     this.hemi.groundColor.set(0x1a1820).lerp(new THREE.Color(0x7a5a40), day);
     this.scene.environmentIntensity = 0.03 + 0.32 * day;

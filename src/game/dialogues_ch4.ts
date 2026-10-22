@@ -175,6 +175,7 @@ export const CH4_DIALOGUES: Record<string, DialogueDef> = {
             action: (g) => {
               g.takeItem('ledger');
               g.flags.add('sidedMorelli');
+              g.addKarma(-30);
               g.giveItem('caps', 400);
               g.addXp(500);
               g.quests.families.state = 'rewarded';
@@ -288,6 +289,7 @@ export const CH4_DIALOGUES: Record<string, DialogueDef> = {
           {
             text: 'Добро пожаловать в отряд, Маркус.',
             action: (g) => {
+              g.addKarma(40);
               g.quests.scorpions.state = 'rewarded';
               g.giveItem('caps', 200);
               g.addXp(500);
@@ -298,6 +300,7 @@ export const CH4_DIALOGUES: Record<string, DialogueDef> = {
           {
             text: 'Город без шерифа пропадёт. Оставайся.',
             action: (g) => {
+              g.addKarma(40);
               g.quests.scorpions.state = 'rewarded';
               g.giveItem('caps', 200);
               g.addXp(500);

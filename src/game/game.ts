@@ -23,6 +23,7 @@ import { OIL_RIG, RIG_DOCK, RIG_SOLDIERS } from '../world/locations/oilrig';
 import { NAVARRO_SOLDIERS } from '../world/locations/navarro';
 import { MORELLI_IDS, CARVER_IDS } from '../world/locations/newreno';
 import { UI } from '../ui/ui';
+import { LOCATION_BARKS, COMPANION_BANTER } from './barks';
 import { showWorldMap } from '../ui/worldmap';
 
 function plural(n: number, one: string, few: string, many: string) {
@@ -62,6 +63,7 @@ interface SaveData {
   kills: number;
   questKills: Record<string, number>;
   traders: Record<string, Record<string, number>>;
+  karma?: number;
 }
 
 export class Game {
@@ -380,6 +382,7 @@ export class Game {
       kills: this.kills,
       questKills: this.questKills,
       traders: this.traders,
+      karma: this.karma,
     };
     try {
       localStorage.setItem(SAVE_KEY, JSON.stringify(data));
@@ -441,6 +444,7 @@ export class Game {
     this.kills = d.kills;
     this.questKills = d.questKills;
     this.traders = d.traders ?? {};
+    this.karma = d.karma ?? 0;
     // Восстанавливаем отряд до входа в локацию, чтобы он появился рядом с игроком.
     const restored: Actor[] = [];
     if (this.flags.has('dogFound') && this.quests.dog?.state !== 'rewarded' && !this.flags.has('dogDead')) restored.push(this.dog);
@@ -496,6 +500,7 @@ export class Game {
       audio.play('levelup');
       this.ui.log(`Уровень ${this.char.level}! Очки навыков: +${this.char.skillPointsPerLevel}. Распредели их в окне персонажа (C).`, 'warn');
       if (this.char.perkPoints > 0) this.ui.log('Доступна новая способность! Выбери её в окне персонажа (C).', 'warn');
+      this.levelCompanions(levels);
       this.applyPerks();
     }
     this.ui.updateHud();
@@ -537,6 +542,7 @@ export class Game {
   completeDogQuest() {
     if (!this.quests.dog) this.quests.dog = { state: 'done', progress: 0 };
     this.quests.dog.state = 'rewarded';
+    this.addKarma(30);
     this.giveItem('powder', 2);
     this.addXp(250);
     this.dog.follow = null;
@@ -830,6 +836,7 @@ export class Game {
 
   private startCombat(playerFirst: boolean, by?: Actor) {
     if (this.mode !== 'explore') return;
+    if (this.sneaking) this.toggleSneak();
     for (const a of this.actors) {
       a.stop();
       a.speed = a.baseSpeed;
@@ -1057,7 +1064,10 @@ export class Game {
       case 'carverSafe': {
         if (this.flags.has('ledgerTaken')) break;
         // Охрана рядом — заметят.
-        const guards = this.actors.filter((a) => CARVER_IDS.includes(a.id) && !a.dead && a.faction !== 'hostile' && a.distanceTo(this.player) < 9);
+        const nearGuards = this.actors.filter((a) => CARVER_IDS.includes(a.id) && !a.dead && a.faction !== 'hostile' && a.distanceTo(this.player) < 9);
+        // Крадущийся вор может остаться незамеченным даже под носом у охраны.
+        const guards = nearGuards.length && this.sneakCheck(0) ? [] : nearGuards;
+        if (nearGuards.length && !guards.length) this.ui.log('Вы бесшумно возитесь с замком прямо за спиной охраны. [Скрытность]', 'good');
         this.flags.add('ledgerTaken');
         this.giveItem('ledger');
         this.removeInteractable(it);
@@ -1174,6 +1184,7 @@ export class Game {
   fixReactor(byPlayer: boolean) {
     this.inv.remove('regulator');
     this.flags.add('reactorFixed');
+    this.addKarma(60);
     const q = this.quests.reactor ?? (this.quests.reactor = { state: 'active', progress: 1 });
     q.state = 'rewarded';
     this.addXp(byPlayer ? 600 : 350);
@@ -1238,6 +1249,7 @@ export class Game {
 
   freeTribe() {
     this.flags.add('tribeFreed');
+    this.addKarma(100);
     this.advanceQuest('enclave', 4);
     this.addXp(800);
     const dock = this.nav.center(...this.nav.cellOf(RIG_DOCK.x, RIG_DOCK.z));
@@ -1341,6 +1353,11 @@ export class Game {
     if (f.has('clawsAllow')) slides.push('Когти смерти Убежища 13 жили тихо. Путники рассказывали о разумных чудовищах, которые не трогают людей.');
     else if (f.has('deathclawsHostile')) slides.push('Убежище 13 опустело навсегда. Ветер гоняет пыль по его залам.');
     const days = Math.max(1, Math.floor(this.days));
+    slides.push(this.karma >= 100
+      ? `В деревнях от Арройо до Брокен-Хиллз о тебе рассказывали детям как о герое. «${this.karmaTitle}» — так тебя звали у костров.`
+      : this.karma <= -100
+        ? `Твоё имя произносили шёпотом и с оглядкой. «${this.karmaTitle}» — так тебя звали те, кому ты встречался на пути.`
+        : 'Одни звали тебя героем, другие — бродягой с ружьём. Пустошь не любит простых ответов.');
     slides.push(`${this.char.name} стал легендой пустоши. Уровень ${this.char.level}, побеждено врагов: ${this.kills}, ${days} ${plural(days, 'день', 'дня', 'дней')} в пути.`);
     return slides;
   }
@@ -1476,7 +1493,12 @@ export class Game {
         this.startCombat(true);
         return;
       }
-      if (await this.walkTo(a.pos, 2.6, token)) this.interactActor(a);
+      // Shift+клик по мирному человеку — попытка карманной кражи.
+      const steal = (this.keys.has('ShiftLeft') || this.keys.has('ShiftRight')) && a.faction === 'villager' && a.rig instanceof HumanoidRig;
+      if (await this.walkTo(a.pos, steal ? 1.6 : 2.6, token)) {
+        if (steal) this.attemptSteal(a);
+        else this.interactActor(a);
+      }
       return;
     }
     if (h.inter) {
@@ -1548,6 +1570,7 @@ export class Game {
       case 'Escape': this.ui.closePanel(); break;
       case 'Space': e.preventDefault(); this.endTurn(); break;
       case 'KeyF': this.requestCombat(); break;
+      case 'KeyV': this.toggleSneak(); break;
       case 'KeyH':
         this.helpHidden = !this.helpHidden;
         this.ui.showHud(this.mode !== 'dead');
@@ -1685,7 +1708,7 @@ export class Game {
     const p = this.player;
     for (const a of this.actors) {
       if (a === p || a.dead) continue;
-      if (a.faction === 'hostile' && a.detectRadius && a.distanceTo(p) < a.detectRadius && this.mode === 'explore') {
+      if (a.faction === 'hostile' && a.detectRadius && a.distanceTo(p) < a.detectRadius * this.detectFactor && this.mode === 'explore') {
         this.startCombat(false, a);
         return;
       }
@@ -1736,6 +1759,7 @@ export class Game {
       return;
     }
     this.location.update?.(this, dt);
+    this.chatter(dt);
 
     this.regenAcc += dt;
     if (this.regenAcc > (this.char.has('healer') ? 4 : 8)) {
@@ -1744,6 +1768,115 @@ export class Game {
         this.char.hp++;
         p.hp = this.char.hp;
       }
+    }
+  }
+
+  // ─── Живой мир: реплики жителей и спутников ───────────────────────────────
+
+  private barkTimer = 6;
+  private banterTimer = 40;
+
+  private chatter(dt: number) {
+    this.barkTimer -= dt;
+    this.banterTimer -= dt;
+    const p = this.player;
+    if (this.barkTimer <= 0) {
+      this.barkTimer = 7 + Math.random() * 9;
+      const lines = LOCATION_BARKS[this.location.id];
+      const near = this.actors.filter((a) => !a.dead && a !== p && a.faction === 'villager' && a.distanceTo(p) < 11 && !a.follow);
+      if (lines && near.length) {
+        const a = near[Math.floor(Math.random() * near.length)];
+        this.ui.speech(a.pos, a.rig.height, lines[Math.floor(Math.random() * lines.length)]);
+      }
+    }
+    if (this.banterTimer <= 0) {
+      this.banterTimer = 50 + Math.random() * 60;
+      const party = this.party.filter((a) => COMPANION_BANTER[a.id]);
+      if (!party.length) return;
+      const a = party[Math.floor(Math.random() * party.length)];
+      const b = COMPANION_BANTER[a.id];
+      const local = b.loc?.[this.location.id];
+      const pool = local && Math.random() < 0.65 ? local : b.any;
+      const line = pool[Math.floor(Math.random() * pool.length)];
+      this.ui.speech(a.pos, a.rig.height, line, '#a8ffb4');
+      this.ui.log(`${a.name}: «${line}»`);
+    }
+  }
+
+  /** Спутники растут вместе с героем. */
+  private levelCompanions(levels: number) {
+    const all = new Set([...this.companionActors.values(), this.dog]);
+    for (const a of all) {
+      if (a.dead) continue;
+      a.maxHp += 8 * levels;
+      a.hp = Math.min(a.maxHp, a.hp + 8 * levels);
+      a.skill = Math.min(95, a.skill + 4 * levels);
+    }
+    if (this.party.length) this.ui.log('Спутники тоже стали опытнее.', 'good');
+  }
+
+  // ─── Скрытность, кража, карма ──────────────────────────────────────────────
+
+  sneaking = false;
+  karma = 0;
+
+  toggleSneak() {
+    if (this.mode !== 'explore') return;
+    this.sneaking = !this.sneaking;
+    this.player.speed = this.player.baseSpeed * (this.sneaking ? 0.55 : 1);
+    this.ui.log(this.sneaking ? `Вы крадётесь. Скрытность: ${this.char.skill('sneak')}%.` : 'Вы идёте открыто.');
+    this.ui.updateHud();
+  }
+
+  /** Во сколько раз сокращается дальность, на которой враги замечают героя. */
+  get detectFactor() {
+    const night = this.location.indoor ? 0 : this.r.night;
+    let f = 1 - night * 0.2;
+    if (this.sneaking) f *= Math.max(0.25, 1 - this.char.skill('sneak') / 130);
+    return f;
+  }
+
+  /** Бросок на Скрытность (модификатор — сложность). */
+  sneakCheck(mod: number) {
+    if (!this.sneaking) return false;
+    return Math.random() * 100 < this.char.skill('sneak') + mod;
+  }
+
+  addKarma(n: number) {
+    this.karma += n;
+    if (n >= 20) this.ui.log(`Карма растёт (+${n}).`, 'good');
+    else if (n <= -10) this.ui.log(`Карма падает (${n}).`, 'bad');
+  }
+
+  get karmaTitle() {
+    const k = this.karma;
+    return k >= 300 ? 'Защитник пустоши' : k >= 100 ? 'Добрая душа' : k <= -300 ? 'Бич пустоши' : k <= -100 ? 'Негодяй' : 'Странник';
+  }
+
+  /** Карманная кража у мирного жителя. */
+  attemptSteal(a: Actor) {
+    if (this.flags.has(`robbed:${a.id}`)) {
+      this.ui.log(`У ${a.name.toLowerCase()} больше нечего взять.`);
+      return;
+    }
+    const chance = Math.max(5, Math.min(90, this.char.skill('steal') - 15 + (this.sneaking ? 15 : 0)));
+    if (Math.random() * 100 < chance) {
+      this.flags.add(`robbed:${a.id}`);
+      const stock = TRADERS[a.dialogue ?? ''] ? this.traderStock(a.dialogue!) : null;
+      const goods = stock ? Object.entries(stock).filter(([id, n]) => id !== 'caps' && n > 0) : [];
+      if (goods.length && Math.random() < 0.6) {
+        const [id] = goods[Math.floor(Math.random() * goods.length)];
+        stock![id]--;
+        if (stock![id] <= 0) delete stock![id];
+        this.giveItem(id);
+      } else this.giveItem('caps', randInt(5, 40));
+      this.ui.log(`Ловко! ${a.name} ничего не заметил. [Кража ${chance}%]`, 'good');
+      this.addKarma(-15);
+      this.addXp(25);
+    } else {
+      this.ui.log(`${a.name} хватает вас за руку! «Вор!»`, 'bad');
+      this.addKarma(-10);
+      this.turnHostile([a.id]);
     }
   }
 
@@ -1827,7 +1960,7 @@ export class Game {
       if (this.mode !== 'menu') this.days += dt / 1440;
     }
     if (this.location.indoor) this.r.setIndoor();
-    else this.r.setTime(this.hour);
+    else this.r.setTime(this.hour, this.location.nightAmbient);
     this.radiation(dt);
     this.tickCountdown(dt);
 

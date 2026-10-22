@@ -19,7 +19,16 @@ const LOCATION_NOTES: Record<string, string> = {
   den: 'Гильдия работорговцев — на севере. Клетка с пленником — рядом. В юго-восточном переулке опасно. Выход — на запад.',
 };
 
-interface Floater { el: HTMLDivElement; pos: THREE.Vector3; t: number }
+interface Floater {
+  el: HTMLDivElement;
+  pos: THREE.Vector3;
+  t: number;
+  dur: number;
+  rise: number;
+  /** Живая позиция говорящего — реплика следует за ним. */
+  anchor?: THREE.Vector3;
+  offset?: number;
+}
 
 export type PanelKind = 'inv' | 'cha' | 'pip' | 'trade';
 
@@ -37,6 +46,7 @@ export class UI {
     $('btn-end').addEventListener('click', () => game.endTurn());
     $('btn-combat').addEventListener('click', () => game.requestCombat());
     $('btn-aim').addEventListener('click', () => game.toggleAim());
+    $('btn-sneak').addEventListener('click', () => game.toggleSneak());
     window.addEventListener('keydown', (e) => {
       if (e.code === 'Escape') this.hideAimMenu();
     });
@@ -87,6 +97,7 @@ export class UI {
     ($('btn-end') as HTMLButtonElement).disabled = !playerTurn;
     ($('btn-combat') as HTMLButtonElement).disabled = inCombat;
     ($('btn-aim') as HTMLButtonElement).disabled = !playerTurn;
+    $('btn-sneak').classList.toggle('on', g.sneaking);
     $('btn-aim').classList.toggle('on', g.aimMode);
     $('clock').textContent = g.clockText();
     const cd = $('countdown');
@@ -117,7 +128,17 @@ export class UI {
     el.textContent = text;
     el.style.color = color;
     $('floaters').appendChild(el);
-    this.floaters.push({ el, pos: pos.clone(), t: 0 });
+    this.floaters.push({ el, pos: pos.clone(), t: 0, dur: 1.6, rise: 0.9 });
+  }
+
+  /** Реплика над головой персонажа. */
+  speech(anchor: THREE.Vector3, height: number, text: string, color = '#e8dcc0') {
+    const el = document.createElement('div');
+    el.className = 'floater speech';
+    el.textContent = text;
+    el.style.color = color;
+    $('floaters').appendChild(el);
+    this.floaters.push({ el, pos: anchor.clone(), t: 0, dur: 4, rise: 0.05, anchor, offset: height + 0.4 });
   }
 
   banner(text: string, sec = 1.6) {
@@ -132,11 +153,12 @@ export class UI {
     for (let i = this.floaters.length - 1; i >= 0; i--) {
       const f = this.floaters[i];
       f.t += dt;
-      v.copy(f.pos).add(new THREE.Vector3(0, f.t * 0.9, 0)).project(camera);
+      if (f.anchor) f.pos.copy(f.anchor).setY(f.anchor.y + (f.offset ?? 0));
+      v.copy(f.pos).add(new THREE.Vector3(0, f.t * f.rise, 0)).project(camera);
       f.el.style.left = ((v.x + 1) / 2) * window.innerWidth + 'px';
       f.el.style.top = ((1 - v.y) / 2) * window.innerHeight + 'px';
-      f.el.style.opacity = String(Math.min(1, 2.5 - f.t * 1.6));
-      if (f.t > 1.6 || v.z > 1) {
+      f.el.style.opacity = String(Math.min(1, (f.dur - f.t) * 1.6, f.t * 6));
+      if (f.t > f.dur || v.z > 1) {
         f.el.remove();
         this.floaters.splice(i, 1);
       }
@@ -445,6 +467,7 @@ export class UI {
           <div class="row"><span>Дата</span><span class="v">${g.dateText(g.days, true)}</span></div>
           <div class="row"><span>Местность</span><span class="v">${esc(g.location.name)}</span></div>
           <div class="row"><span>Координаты</span><span class="v">${g.player.pos.x.toFixed(0)}, ${g.player.pos.z.toFixed(0)}</span></div>
+          <div class="row"><span>Карма</span><span class="v">${g.karma} · ${esc(g.karmaTitle)}</span></div>
           <div class="row"><span>Радиация</span><span class="v">${Math.round(g.char.rads)} рад${g.char.radPenalty ? ` (−${g.char.radPenalty} ОД)` : ''}</span></div>
           <div class="row"><span>Убито врагов</span><span class="v">${g.kills}</span></div>
           <h3 style="margin-top:12px">Заметки</h3>

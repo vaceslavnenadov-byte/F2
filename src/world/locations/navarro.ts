@@ -159,7 +159,9 @@ export const NAVARRO: LocationDef = {
     // Посторонний за забором — тревога.
     if (g.flags.has('navarroIn') || g.flags.has('navarroAlarm')) return;
     const p = g.player.pos;
-    if (p.x > BASE.x0 && p.x < BASE.x1 && p.z > BASE.z0 && p.z < BASE.z1) {
+    // Внутри периметра тревогу поднимает солдат, который заметил героя (крадущегося — с меньшего расстояния).
+    const seen = g.actors.some((a) => NAVARRO_SOLDIERS.includes(a.id) && !a.dead && a.distanceTo(p) < 12 * g.detectFactor);
+    if (p.x > BASE.x0 && p.x < BASE.x1 && p.z > BASE.z0 && p.z < BASE.z1 && seen) {
       g.ui.log('ТРЕВОГА! Посторонний на базе!', 'bad');
       g.turnHostile(NAVARRO_SOLDIERS, 'navarroAlarm');
     }

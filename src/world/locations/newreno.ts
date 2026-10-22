@@ -67,6 +67,10 @@ function build(w: World, flags: Set<string>) {
   building(w, -4, -14, 16, 10, 7, 0, '#6a4a3a'); // казино «Десятка»
   neon(w, -4, w.y(-4, -14) + 7.6, -8.9, 0, '#ff3a8a', 9);
   neon(w, -4, w.y(-4, -14) + 5.2, -8.9, 0, '#ffd040', 5, false);
+  // Мягкая цветная подсветка улицы вместо множества мелких ламп.
+  const fill = new THREE.PointLight(0xff9a60, 18, 40, 1.2);
+  fill.position.set(4, w.y(4, 0) + 10, 0);
+  w.group.add(fill);
   building(w, 16, -12, 10, 8, 5, 0, '#5a4a40'); // бар «Подкова»
   neon(w, 16, w.y(16, -12) + 5.6, -7.9, 0, '#40d0ff', 6);
   building(w, -24, -12, 9, 8, 6, 0, '#4a4040');
@@ -120,6 +124,7 @@ function build(w: World, flags: Set<string>) {
   w.group.add(lamp);
 
   // Уличные фонари и мусор.
+  const lit = [[6, -4], [26, 5]];
   for (const [x, z] of [[-14, -4], [6, -4], [26, -4], [-14, 5], [26, 5]]) {
     const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.09, 4.5, 8), w.mat.metal);
     pole.position.y = 2.25;
@@ -129,9 +134,12 @@ function build(w: World, flags: Set<string>) {
     g.add(pole, bulb);
     w.place(g, x, z, 0, 0);
     w.nav.blockCircle(x, z, 0.4);
-    const l = new THREE.PointLight(0xffc880, 8, 12, 1.6);
-    l.position.set(x, w.y(x, z) + 4.4, z);
-    w.group.add(l);
+    // Источники света только у части фонарей — остальное даёт ночная подсветка города.
+    if (lit.some(([lx, lz]) => lx === x && lz === z)) {
+      const l = new THREE.PointLight(0xffc880, 10, 14, 1.6);
+      l.position.set(x, w.y(x, z) + 4.4, z);
+      w.group.add(l);
+    }
   }
   w.place(w.carWreck(1100), -6, 6, 1.5, 0.1);
   w.nav.blockRect(-6, 6, 1.1, 2.3, 1.5);
@@ -185,6 +193,7 @@ export const NEW_RENO: LocationDef = {
   entries: { default: [48, 0], world: [48, 0] },
   exits: [EXIT],
   scatter: { rocks: 120, trees: 8, grass: 900, reserved: [{ x: 0, z: -8, r: 46 }] },
+  nightAmbient: 0.45,
   build,
   spawn,
 };

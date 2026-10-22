@@ -11,6 +11,8 @@ export interface LocationDef {
   /** Зоны выхода на карту мира. */
   exits: Circle[];
   scatter: { rocks: number; trees: number; grass: number; reserved: Circle[] };
+  /** Добавка к рассеянному свету ночью (освещённые города). */
+  nightAmbient?: number;
   /** Помещение: свой свет без неба и смены дня. */
   indoor?: boolean;
   /** Радиоактивные зоны: доза в рад/с внутри круга. */

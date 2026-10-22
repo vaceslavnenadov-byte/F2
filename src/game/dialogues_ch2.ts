@@ -303,7 +303,7 @@ export const CH2_DIALOGUES: Record<string, DialogueDef> = {
         options: [
           { text: 'Вы… умеете говорить?', next: 'talk' },
           { text: 'Я пришёл за ГЭКК. Моё племя умирает от засухи.', next: 'geck' },
-          { text: '[Атаковать]', action: (g) => g.turnHostile(CLAWS, 'deathclawsHostile'), next: null },
+          { text: '[Атаковать]', action: (g) => { g.addKarma(-40); g.turnHostile(CLAWS, 'deathclawsHostile'); }, next: null },
           { text: 'Ухожу.', next: null },
         ],
       },
@@ -320,6 +320,7 @@ export const CH2_DIALOGUES: Record<string, DialogueDef> = {
             cond: (g) => g.char.skill('speech') >= 65,
             action: (g) => {
               g.flags.add('clawsAllow');
+              g.addKarma(40);
               g.addXp(400);
             },
             next: 'allow',
@@ -330,6 +331,7 @@ export const CH2_DIALOGUES: Record<string, DialogueDef> = {
             cond: (g) => g.char.skill('science') >= 50,
             action: (g) => {
               g.flags.add('clawsAllow');
+              g.addKarma(40);
               g.addXp(400);
             },
             next: 'fixed',

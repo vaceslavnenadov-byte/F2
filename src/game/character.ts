@@ -18,6 +18,8 @@ export const SKILLS = [
   { id: 'smallGuns', name: 'Лёгкое оружие', base: (s: Special) => 4 + 2 * s.ag },
   { id: 'melee', name: 'Холодное оружие', base: (s: Special) => 20 + 2 * (s.ag + s.st) },
   { id: 'unarmed', name: 'Без оружия', base: (s: Special) => 30 + 2 * (s.ag + s.st) },
+  { id: 'sneak', name: 'Скрытность', base: (s: Special) => 5 + 3 * s.ag },
+  { id: 'steal', name: 'Кража', base: (s: Special) => 3 * s.ag },
   { id: 'firstAid', name: 'Первая помощь', base: (s: Special) => 2 * (s.pe + s.in) },
   { id: 'speech', name: 'Красноречие', base: (s: Special) => 5 * s.ch },
   { id: 'barter', name: 'Бартер', base: (s: Special) => 4 * s.ch },
@@ -51,7 +53,7 @@ export class Character {
   name = 'Избранный';
   special: Special = { st: 5, pe: 5, en: 5, ch: 5, in: 5, ag: 5, lk: 5 };
   tags = new Set<SkillId>();
-  spent: Record<SkillId, number> = { smallGuns: 0, melee: 0, unarmed: 0, firstAid: 0, speech: 0, barter: 0, science: 0, repair: 0, outdoorsman: 0 };
+  spent: Record<SkillId, number> = { smallGuns: 0, melee: 0, unarmed: 0, firstAid: 0, sneak: 0, steal: 0, speech: 0, barter: 0, science: 0, repair: 0, outdoorsman: 0 };
   level = 1;
   xp = 0;
   skillPoints = 0;

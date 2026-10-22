@@ -298,6 +298,7 @@ export const DIALOGUES: Record<string, DialogueDef> = {
             text: 'Благодарю.',
             action: (g) => {
               g.quests.rats.state = 'rewarded';
+              g.addKarma(20);
               g.giveItem('caps', 100);
               g.addXp(200);
             },
@@ -560,6 +561,7 @@ function pick(lines: string[]) {
 
 function freeVic(g: Game) {
   g.flags.add('vicFree');
+  g.addKarma(50);
   g.advanceQuest('geck', 2);
   const vic = g.actors.find((a) => a.id === 'vic');
   if (vic) {
