@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Пустошь 2241 — Арройо</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=VT323&family=Oswald:wght@500;700&display=swap" rel="stylesheet" />
+  </head>
+  <body>
+    <div id="app"></div>
+    <div id="ui">
+      <div id="floaters"></div>
+      <div id="banner"></div>
+      <div id="turn-indicator"></div>
+      <div id="tooltip"></div>
+      <div id="hud" class="hidden">
+        <div id="log" class="crt"></div>
+        <div class="hud-buttons">
+          <button data-act="inv" title="Инвентарь (I)">ИНВ</button>
+          <button data-act="cha" title="Персонаж (C)">ПЕРС</button>
+          <button data-act="pip" title="Пип-Бой (P)">ПИП</button>
+        </div>
+        <button id="weapon-slot" title="Оружие в руках">
+          <div class="w-name"></div>
+          <div class="w-info"></div>
+        </button>
+        <div class="hud-stats">
+          <div class="stat"><span class="lbl">ОЗ</span><span id="hp" class="num">00</span></div>
+          <div class="stat"><span class="lbl">КБ</span><span id="ac" class="num">00</span></div>
+        </div>
+        <div class="hud-right">
+          <div id="ap-bar"></div>
+          <div class="combat-buttons">
+            <button id="btn-combat" title="Начать бой (F)">БОЙ</button>
+            <button id="btn-end" title="Закончить ход (Пробел)">КОНЕЦ ХОДА</button>
+          </div>
+        </div>
+      </div>
+      <div id="dialogue" class="hidden">
+        <div class="dlg-head"><span id="dlg-name"></span></div>
+        <div id="dlg-text" class="crt"></div>
+        <div id="dlg-options" class="crt"></div>
+      </div>
+      <div id="panel" class="hidden"></div>
+      <div id="screen" class="hidden"></div>
+      <div id="help" class="hidden">
+        ЛКМ — идти / действовать · WASD — движение · ПКМ/Q/E — поворот камеры · колесо — зум<br />
+        I — инвентарь · C — персонаж · P — Пип-Бой · F — бой · Пробел — конец хода · F5/F9 — сохранить/загрузить · H — скрыть
+      </div>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
