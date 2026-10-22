@@ -4,17 +4,19 @@ import { LOCATIONS } from './world/locations';
 
 const game = new Game(document.getElementById('app')!);
 
-if (Game.consumeLoadFlag() && game.loadFromStorage()) {
-  // Загрузка сохранения после перезапуска страницы.
-} else {
-  const showMenu = () =>
-    game.ui.showMainMenu(
-      Game.hasSave(),
-      () => game.ui.showCreation((c) => game.beginNewGame(c)),
-      () => game.requestLoad(),
-    );
-  showMenu();
-}
+const showMenu = (): void =>
+  game.ui.showMainMenu(
+    Game.hasSave(),
+    () => game.ui.showCreation((c) => game.beginNewGame(c)),
+    () => game.ui.showSlots('load', (slot) => game.requestLoad(slot), showMenu),
+    () => game.ui.showSettings(game.settings, (s) => {
+      game.settings = s;
+      game.applySettings();
+    }, showMenu),
+  );
+
+const slot = Game.consumeLoadFlag();
+if (!(slot && game.loadFromStorage(slot))) showMenu();
 
 // Доступ из консоли для отладки.
 (window as unknown as { game: Game }).game = game;

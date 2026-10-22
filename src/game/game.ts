@@ -24,6 +24,8 @@ import { NAVARRO_SOLDIERS } from '../world/locations/navarro';
 import { MORELLI_IDS, CARVER_IDS } from '../world/locations/newreno';
 import { UI } from '../ui/ui';
 import { LOCATION_BARKS, COMPANION_BANTER } from './barks';
+import { loadSettings, saveSettings, type Settings } from './settings';
+import { TIPS, tipShown, markTip } from './tips';
 import { showWorldMap } from '../ui/worldmap';
 
 function plural(n: number, one: string, few: string, many: string) {
@@ -36,7 +38,7 @@ function plural(n: number, one: string, few: string, many: string) {
 
 const PLAYER_LOOK = { skin: '#c48a60', cloth: '#6e5038', hair: '#3a2516', build: 1.05 };
 
-type Mode = 'menu' | 'explore' | 'combat' | 'dialogue' | 'dead' | 'map';
+type Mode = 'menu' | 'explore' | 'combat' | 'dialogue' | 'dead' | 'map' | 'pause';
 
 const SAVE_KEY = 'wasteland2241.save';
 const LOAD_FLAG = 'wasteland2241.loadOnStart';
@@ -50,6 +52,7 @@ interface Hover {
 
 interface SaveData {
   v: 2;
+  meta: { name: string; level: number; place: string; date: string; savedAt: number };
   char: ReturnType<Character['toJSON']>;
   inv: ReturnType<Inventory['toJSON']>;
   loc: { id: string; kind?: EncounterKind; seed?: number };
@@ -172,6 +175,7 @@ export class Game {
 
     this.enterLocation(ARROYO, 'default');
     this.bindInput();
+    this.applySettings();
     this.r.renderer.setAnimationLoop(() => this.frame());
   }
 
@@ -280,6 +284,7 @@ export class Game {
   get hour() { return (((this.days * 24 + 15) % 24) + 24) % 24; }
 
   private openWorldMap() {
+    this.tip('map');
     this.mode = 'map';
     this.ui.closePanel();
     this.ui.showHud(false);
@@ -343,6 +348,7 @@ export class Game {
     this.ui.log(`${c.name}, добро пожаловать в Арройо.`, 'good');
     this.ui.log('Поговори со Старейшиной у большой хижины на севере деревни.');
     this.ui.log('Южная тропа ведёт к выходу на карту мира.');
+    this.tip('start');
     this.ui.banner('АРРОЙО', 2.5);
   }
 
@@ -358,17 +364,38 @@ export class Game {
     this.ui.updateHud();
   }
 
-  save() {
-    if (this.mode !== 'explore') {
+  /** Слоты сохранений: быстрый (F5/F9) и три ручных. */
+  static readonly SLOTS = ['quick', '1', '2', '3'];
+
+  private static slotKey(slot: string) { return `${SAVE_KEY}.${slot}`; }
+
+  /** Краткая сводка слота для меню (или null, если пусто). */
+  static slotInfo(slot: string): { name: string; level: number; place: string; date: string; savedAt: number } | null {
+    try {
+      const d = JSON.parse(localStorage.getItem(Game.slotKey(slot)) ?? 'null');
+      return d?.v === 2 && d.meta ? d.meta : null;
+    } catch {
+      return null;
+    }
+  }
+
+  canSave(): boolean {
+    if (this.mode !== 'explore' && !(this.mode === 'pause' && this.pausedFrom === 'explore')) {
       this.ui.log('Сохраниться можно только вне боя и диалога.', 'warn');
-      return;
+      return false;
     }
-    if (this.countdown !== null) {
-      this.ui.log('Не время сохраняться — реактор вот-вот рванёт!', 'bad');
-      return;
+    if (this.combat || this.countdown !== null) {
+      this.ui.log(this.countdown !== null ? 'Не время сохраняться — реактор вот-вот рванёт!' : 'Сохраниться можно только вне боя.', 'bad');
+      return false;
     }
+    return true;
+  }
+
+  save(slot = 'quick'): boolean {
+    if (!this.canSave()) return false;
     const data: SaveData = {
       v: 2,
+      meta: { name: this.char.name, level: this.char.level, place: this.location.name, date: this.dateText(this.days, true), savedAt: Date.now() },
       char: this.char.toJSON(),
       inv: this.inv.toJSON(),
       loc: this.encounterInfo ? { id: 'encounter', ...this.encounterInfo } : { id: this.location.id },
@@ -385,50 +412,59 @@ export class Game {
       karma: this.karma,
     };
     try {
-      localStorage.setItem(SAVE_KEY, JSON.stringify(data));
-      this.ui.log('Игра сохранена.', 'good');
+      localStorage.setItem(Game.slotKey(slot), JSON.stringify(data));
+      this.ui.log(slot === 'quick' ? 'Быстрое сохранение.' : `Игра сохранена в слот ${slot}.`, 'good');
+      return true;
     } catch {
       this.ui.log('Не удалось сохранить игру.', 'bad');
-    }
-  }
-
-  static hasSave(): boolean {
-    try {
-      const d = JSON.parse(localStorage.getItem(SAVE_KEY) ?? 'null');
-      return d?.v === 2;
-    } catch {
       return false;
     }
   }
 
+  static hasSave(): boolean {
+    // Старое единственное сохранение переносим в быстрый слот.
+    try {
+      const legacy = localStorage.getItem(SAVE_KEY);
+      if (legacy && !localStorage.getItem(Game.slotKey('quick'))) {
+        const d = JSON.parse(legacy);
+        d.meta ??= { name: d.char?.name ?? '—', level: d.char?.level ?? 1, place: '—', date: '—', savedAt: 0 };
+        localStorage.setItem(Game.slotKey('quick'), JSON.stringify(d));
+      }
+    } catch {
+      /* нет хранилища — нет и сохранений */
+    }
+    return Game.SLOTS.some((s) => Game.slotInfo(s));
+  }
+
   /** Загрузка через перезапуск страницы — мир гарантированно возвращается в исходное состояние. */
-  requestLoad() {
-    if (!Game.hasSave()) {
-      this.ui.log('Сохранений нет.', 'warn');
+  requestLoad(slot = 'quick') {
+    if (!Game.slotInfo(slot)) {
+      this.ui.log('В этом слоте нет сохранения.', 'warn');
       return;
     }
     try {
-      sessionStorage.setItem(LOAD_FLAG, '1');
+      sessionStorage.setItem(LOAD_FLAG, slot);
     } catch {
       /* без sessionStorage просто откроется меню */
     }
     location.reload();
   }
 
-  static consumeLoadFlag(): boolean {
+  /** Слот, который нужно загрузить после перезапуска (или null). */
+  static consumeLoadFlag(): string | null {
     try {
       const v = sessionStorage.getItem(LOAD_FLAG);
       sessionStorage.removeItem(LOAD_FLAG);
-      return v === '1';
+      return v === '1' && !Game.slotInfo('1') ? 'quick' : v;
     } catch {
-      return false;
+      return null;
     }
   }
 
-  loadFromStorage(): boolean {
+  loadFromStorage(slot = 'quick'): boolean {
     let d: SaveData | null;
     try {
-      d = JSON.parse(localStorage.getItem(SAVE_KEY) ?? 'null');
+      d = JSON.parse(localStorage.getItem(Game.slotKey(slot)) ?? 'null');
     } catch {
       d = null;
     }
@@ -497,6 +533,7 @@ export class Game {
       this.player.hp = this.char.hp;
       this.player.maxHp = this.char.maxHp;
       this.ui.banner('НОВЫЙ УРОВЕНЬ!', 2.5);
+      this.tip('levelup');
       audio.play('levelup');
       this.ui.log(`Уровень ${this.char.level}! Очки навыков: +${this.char.skillPointsPerLevel}. Распредели их в окне персонажа (C).`, 'warn');
       if (this.char.perkPoints > 0) this.ui.log('Доступна новая способность! Выбери её в окне персонажа (C).', 'warn');
@@ -641,6 +678,7 @@ export class Game {
   get prices() { return priceMult(this.char.skill('barter')); }
 
   openTrade(id: string) {
+    this.tip('trade');
     this.closeDialogue();
     this.traderStock(id);
     this.ui.openTrade(id);
@@ -804,6 +842,7 @@ export class Game {
     this.char.rads += rate * dt;
     // Счётчик Гейгера трещит тем чаще, чем выше фон.
     this.geigerAcc += rate * dt * 3;
+    this.tip('rads');
     while (this.geigerAcc > Math.random()) {
       this.geigerAcc -= 1;
       audio.play('geiger', undefined, 0.5);
@@ -836,6 +875,7 @@ export class Game {
 
   private startCombat(playerFirst: boolean, by?: Actor) {
     if (this.mode !== 'explore') return;
+    this.tip('combat');
     if (this.sneaking) this.toggleSneak();
     for (const a of this.actors) {
       a.stop();
@@ -922,6 +962,7 @@ export class Game {
     this.effects.hit(target, attacker.pos, isLizard ? new THREE.Color(0.25, 0.3, 0.05) : undefined);
     this.ui.floatText(target.pos.clone().setY(target.pos.y + target.rig.height + 0.3), `−${dmg}`, target === this.player ? '#ff5a4a' : target.faction === 'companion' ? '#ff9a6a' : '#ffd060');
     target.rig.playHit();
+    if (target === this.player && this.char.hp < this.char.maxHp * 0.35) this.tip('lowhp');
     const beast = !(attacker.rig instanceof HumanoidRig);
     audio.play(beast ? 'bite' : 'hit', target.pos);
     if (target === this.player) audio.play('hurt');
@@ -972,19 +1013,24 @@ export class Game {
     }
   }
 
+  private gameOverScreen() {
+    this.ui.showGameOver(Game.hasSave() ? () => this.ui.showSlots('load', (s) => this.requestLoad(s), () => this.gameOverScreen()) : null, () => location.reload());
+  }
+
   private gameOver() {
     this.mode = 'dead';
     this.ui.log('Вы погибли.', 'bad');
     this.combat?.abort();
     setTimeout(() => {
       this.ui.showHud(false);
-      this.ui.showGameOver(Game.hasSave() ? () => this.requestLoad() : null, () => location.reload());
+      this.ui.showGameOver(Game.hasSave() ? () => this.ui.showSlots('load', (s) => this.requestLoad(s), () => this.gameOverScreen()) : null, () => location.reload());
     }, 1800);
   }
 
   // ─── Диалоги ───────────────────────────────────────────────────────────────
 
   private openDialogue(a: Actor) {
+    this.tip('dialogue');
     const def = DIALOGUES[a.dialogue!];
     if (!def) return;
     this.ui.closePanel();
@@ -1471,7 +1517,7 @@ export class Game {
   }
 
   private async onClick() {
-    if (this.mode === 'menu' || this.mode === 'dialogue' || this.mode === 'dead' || this.mode === 'map') return;
+    if (this.mode === 'menu' || this.mode === 'dialogue' || this.mode === 'dead' || this.mode === 'map' || this.mode === 'pause') return;
     if (this.ui.panel) {
       this.ui.closePanel();
       return;
@@ -1558,6 +1604,10 @@ export class Game {
 
   private onKey(e: KeyboardEvent) {
     if (this.mode === 'menu' || this.mode === 'map') return;
+    if (this.mode === 'pause') {
+      if (e.code === 'Escape') this.resume();
+      return;
+    }
     if (this.mode === 'dialogue') {
       const n = Number(e.key);
       if (n >= 1 && n <= 9) this.pickOption(n - 1);
@@ -1567,7 +1617,10 @@ export class Game {
       case 'KeyI': this.ui.togglePanel('inv'); break;
       case 'KeyC': this.ui.togglePanel('cha'); break;
       case 'KeyP': this.ui.togglePanel('pip'); break;
-      case 'Escape': this.ui.closePanel(); break;
+      case 'Escape':
+        if (this.ui.panel) this.ui.closePanel();
+        else this.openPause();
+        break;
       case 'Space': e.preventDefault(); this.endTurn(); break;
       case 'KeyF': this.requestCombat(); break;
       case 'KeyV': this.toggleSneak(); break;
@@ -1752,6 +1805,7 @@ export class Game {
       if (d < e.r + 1.5) nearExit = true;
     }
     if (!nearExit) this.exitArmed = true;
+    else this.tip('exit');
     if (inExit && this.exitArmed) {
       p.stop();
       this.exitArmed = false;
@@ -1769,6 +1823,56 @@ export class Game {
         p.hp = this.char.hp;
       }
     }
+  }
+
+  // ─── Меню паузы, настройки, подсказки ──────────────────────────────────────
+
+  settings: Settings = loadSettings();
+  private pausedFrom: Mode = 'explore';
+
+  applySettings() {
+    audio.setVolumes(this.settings);
+    this.r.applyQuality(this.settings.quality);
+    saveSettings(this.settings);
+  }
+
+  /** Подсказка новичку — один раз за всё время, если подсказки включены. */
+  tip(id: string) {
+    if (!this.settings.tips || tipShown(id) || this.mode === 'menu') return;
+    markTip(id);
+    this.ui.showTip(TIPS[id]);
+  }
+
+  openPause() {
+    if (this.mode !== 'explore' && this.mode !== 'combat') return;
+    this.pausedFrom = this.mode;
+    this.mode = 'pause';
+    this.ui.closePanel();
+    this.ui.tooltip(null);
+    this.pauseMenu();
+  }
+
+  private pauseMenu() {
+    this.ui.showPauseMenu({
+      resume: () => this.resume(),
+      save: () => this.ui.showSlots('save', (s) => {
+        if (this.save(s)) this.resume();
+      }, () => this.pauseMenu()),
+      load: () => this.ui.showSlots('load', (s) => this.requestLoad(s), () => this.pauseMenu()),
+      settings: () => this.ui.showSettings(this.settings, (st) => {
+        this.settings = st;
+        this.applySettings();
+      }, () => this.pauseMenu()),
+      quit: () => location.reload(),
+      canSave: this.pausedFrom === 'explore' && this.countdown === null,
+    });
+  }
+
+  resume() {
+    if (this.mode !== 'pause') return;
+    this.ui.hideScreen();
+    this.mode = this.pausedFrom;
+    this.lastTime = performance.now();
   }
 
   // ─── Живой мир: реплики жителей и спутников ───────────────────────────────
@@ -1822,6 +1926,7 @@ export class Game {
 
   toggleSneak() {
     if (this.mode !== 'explore') return;
+    this.tip('sneak');
     this.sneaking = !this.sneaking;
     this.player.speed = this.player.baseSpeed * (this.sneaking ? 0.55 : 1);
     this.ui.log(this.sneaking ? `Вы крадётесь. Скрытность: ${this.char.skill('sneak')}%.` : 'Вы идёте открыто.');
@@ -1954,7 +2059,7 @@ export class Game {
     const now = performance.now();
     const dt = Math.min(0.05, (now - this.lastTime) / 1000);
     this.lastTime = now;
-    if (this.mode !== 'map') {
+    if (this.mode !== 'map' && this.mode !== 'pause') {
       this.time += dt;
       tickTimers(dt);
       if (this.mode !== 'menu') this.days += dt / 1440;

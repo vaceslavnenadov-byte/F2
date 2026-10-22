@@ -398,3 +398,33 @@ button:disabled { color: #6d6252; cursor: default; }
   text-shadow: none;
 }
 #btn-sneak.on { color: #8aff9a; background: linear-gradient(#2a4a2a, #182818); }
+
+/* ─── Пауза, слоты, настройки, подсказки ─────────────────────────────────── */
+
+.slots .slot { width: min(520px, 90vw); display: flex; flex-direction: column; align-items: flex-start; gap: 2px; text-transform: none; }
+.slots .slot b { font-size: 16px; }
+.slots .slot span { font-family: var(--font-crt); font-size: 17px; color: var(--crt); letter-spacing: 0; }
+.settings .set-box { margin-top: 24px; padding: 14px 18px; width: min(560px, 92vw); text-align: left; font-size: 20px; }
+.set-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 6px 0; }
+.set-row input[type='range'] { flex: 1; accent-color: #58f06a; }
+.set-row input[type='checkbox'] { width: 20px; height: 20px; accent-color: #58f06a; }
+.set-row .v { width: 48px; text-align: right; color: #d6ffd9; }
+.q-group { display: flex; gap: 6px; }
+.inline-btn.on { color: #ffe08a; background: linear-gradient(#6a5a2a, #3a3018); }
+#tip {
+  position: absolute;
+  top: 70px;
+  right: 14px;
+  width: min(360px, calc(100vw - 28px));
+  padding: 10px 30px 10px 14px;
+  font-size: 18px;
+  line-height: 1.15;
+  color: var(--crt);
+  background: #050c06ee;
+  border: 2px solid var(--amber);
+  box-shadow: 0 8px 30px #000c;
+}
+#tip b { display: block; color: var(--amber); font-family: var(--font-head); font-weight: 500; letter-spacing: 0.12em; margin-bottom: 4px; }
+#tip .tip-close { position: absolute; top: 4px; right: 10px; cursor: pointer; color: var(--amber); font-size: 22px; }
+#screen { z-index: 30; }
+#screen:not(.hidden) ~ #help { display: none; }

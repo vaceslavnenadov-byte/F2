@@ -86,6 +86,7 @@ export class AudioEngine {
     this.cricketsGain.gain.value = 0;
     this.cricketsGain.connect(this.ambBus);
 
+    this.applyVolumes();
     const t = ctx.currentTime;
     this.nextChord = t + 0.5;
     this.nextPluck = t + 2;
@@ -95,9 +96,25 @@ export class AudioEngine {
 
   get ready() { return !!this.ctx; }
 
+  private volumes = { master: 0.8, music: 0.6, sfx: 0.8 };
+
+  /** Громкость из настроек (0..1); применяется сразу или при запуске звука. */
+  setVolumes(v: { master: number; music: number; sfx: number }) {
+    this.volumes = { ...v };
+    this.applyVolumes();
+  }
+
+  private applyVolumes() {
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime;
+    this.master.gain.setTargetAtTime(this.muted ? 0 : this.volumes.master, t, 0.05);
+    this.musicBus.gain.setTargetAtTime(this.volumes.music * 0.55, t, 0.05);
+    this.sfxBus.gain.setTargetAtTime(this.volumes.sfx * 0.9, t, 0.05);
+  }
+
   toggleMute(): boolean {
     this.muted = !this.muted;
-    if (this.ctx) this.master.gain.setTargetAtTime(this.muted ? 0 : 0.8, this.ctx.currentTime, 0.05);
+    this.applyVolumes();
     return this.muted;
   }
 

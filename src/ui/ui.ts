@@ -2,7 +2,9 @@ import * as THREE from 'three';
 import { Character, PERKS, SKILLS, SPECIAL_INFO, SPECIAL_KEYS, SPECIAL_POOL, type PerkId, type SkillId } from '../game/character';
 import { ITEMS, TRADERS, itemPrice } from '../game/items';
 import { QUESTS } from '../game/quests';
-import type { Game } from '../game/game';
+import { Game } from '../game/game';
+import { QUALITY_NAMES, type Quality, type Settings } from '../game/settings';
+import { resetTips } from '../game/tips';
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 
@@ -162,6 +164,10 @@ export class UI {
         f.el.remove();
         this.floaters.splice(i, 1);
       }
+    }
+    if (this.tipTimer > 0) {
+      this.tipTimer -= dt;
+      if (this.tipTimer <= 0) $('tip').classList.add('hidden');
     }
     if (this.bannerTimer > 0) {
       this.bannerTimer -= dt;
@@ -490,18 +496,112 @@ export class UI {
 
   hideScreen() { $('screen').className = 'hidden'; }
 
-  showMainMenu(hasSave: boolean, onNew: () => void, onLoad: () => void) {
+  showMainMenu(hasSave: boolean, onNew: () => void, onLoad: () => void, onSettings?: () => void) {
     const s = this.screen(`
       <div class="menu">
         <div class="logo">ПУСТОШЬ 2241<small>АРРОЙО · 3D</small></div>
         <div class="buttons">
           <button id="m-new">Новая игра</button>
           <button id="m-load" ${hasSave ? '' : 'disabled'}>Загрузить</button>
+          ${onSettings ? '<button id="m-set">Настройки</button>' : ''}
         </div>
         <div class="note">Фанатское переосмысление Fallout 2 в полном 3D. Вся графика процедурная, ассеты оригинала не используются.</div>
       </div>`);
     s.querySelector('#m-new')!.addEventListener('click', onNew);
     s.querySelector('#m-load')!.addEventListener('click', onLoad);
+    s.querySelector('#m-set')?.addEventListener('click', () => onSettings?.());
+  }
+
+  // ─── Пауза, слоты, настройки, подсказки ──────────────────────────────────
+
+  showPauseMenu(h: { resume: () => void; save: () => void; load: () => void; settings: () => void; quit: () => void; canSave: boolean }) {
+    const s = this.screen(`
+      <div class="menu">
+        <div class="logo" style="font-size:clamp(36px,6vw,64px)">ПАУЗА</div>
+        <div class="buttons">
+          <button id="p-resume">Продолжить</button>
+          <button id="p-save" ${h.canSave ? '' : 'disabled title="Только вне боя"'}>Сохранить</button>
+          <button id="p-load">Загрузить</button>
+          <button id="p-set">Настройки</button>
+          <button id="p-quit">Главное меню</button>
+        </div>
+      </div>`, true);
+    s.querySelector('#p-resume')!.addEventListener('click', h.resume);
+    s.querySelector('#p-save')!.addEventListener('click', h.save);
+    s.querySelector('#p-load')!.addEventListener('click', h.load);
+    s.querySelector('#p-set')!.addEventListener('click', h.settings);
+    s.querySelector('#p-quit')!.addEventListener('click', h.quit);
+  }
+
+  showSlots(mode: 'save' | 'load', onPick: (slot: string) => void, onBack: () => void) {
+    const rows = Game.SLOTS.map((slot) => {
+      const info = Game.slotInfo(slot);
+      const title = slot === 'quick' ? 'Быстрое (F5)' : `Слот ${slot}`;
+      const desc = info ? `${esc(info.name)}, ур. ${info.level} · ${esc(info.place)} · ${esc(info.date)}` : 'пусто';
+      const disabled = mode === 'load' && !info;
+      return `<button class="slot" data-slot="${slot}" ${disabled ? 'disabled' : ''}><b>${title}</b><span>${desc}</span></button>`;
+    }).join('');
+    const s = this.screen(`
+      <div class="menu">
+        <div class="logo" style="font-size:clamp(32px,5vw,56px)">${mode === 'save' ? 'СОХРАНИТЬ' : 'ЗАГРУЗИТЬ'}</div>
+        <div class="buttons slots">${rows}<button id="s-back">Назад</button></div>
+      </div>`, true);
+    s.querySelectorAll<HTMLElement>('[data-slot]').forEach((b) => b.addEventListener('click', () => onPick(b.dataset.slot!)));
+    s.querySelector('#s-back')!.addEventListener('click', onBack);
+  }
+
+  showSettings(st: Settings, onChange: (s: Settings) => void, onBack: () => void) {
+    const cur = { ...st };
+    const slider = (key: 'master' | 'music' | 'sfx', label: string) =>
+      `<label class="set-row"><span>${label}</span><input type="range" min="0" max="100" value="${Math.round(cur[key] * 100)}" data-vol="${key}"><span class="v" data-out="${key}">${Math.round(cur[key] * 100)}%</span></label>`;
+    const s = this.screen(`
+      <div class="menu settings">
+        <div class="logo" style="font-size:clamp(32px,5vw,56px)">НАСТРОЙКИ</div>
+        <div class="crt set-box">
+          ${slider('master', 'Общая громкость')}
+          ${slider('music', 'Музыка')}
+          ${slider('sfx', 'Звуки')}
+          <div class="set-row"><span>Качество графики</span><span class="q-group">${(Object.keys(QUALITY_NAMES) as Quality[]).map((q) =>
+            `<button class="inline-btn ${cur.quality === q ? 'on' : ''}" data-q="${q}">${QUALITY_NAMES[q]}</button>`).join('')}</span></div>
+          <label class="set-row"><span>Подсказки новичку</span><input type="checkbox" data-tips ${cur.tips ? 'checked' : ''}></label>
+          <div class="set-row"><span></span><button class="inline-btn" data-reset-tips>Показать подсказки заново</button></div>
+        </div>
+        <div class="buttons"><button id="set-back">Готово</button></div>
+      </div>`, true);
+    s.querySelectorAll<HTMLInputElement>('[data-vol]').forEach((inp) =>
+      inp.addEventListener('input', () => {
+        const k = inp.dataset.vol as 'master' | 'music' | 'sfx';
+        cur[k] = Number(inp.value) / 100;
+        s.querySelector(`[data-out="${k}"]`)!.textContent = `${inp.value}%`;
+        onChange({ ...cur });
+      }),
+    );
+    s.querySelectorAll<HTMLElement>('[data-q]').forEach((b) =>
+      b.addEventListener('click', () => {
+        cur.quality = b.dataset.q as Quality;
+        s.querySelectorAll('[data-q]').forEach((x) => x.classList.toggle('on', x === b));
+        onChange({ ...cur });
+      }),
+    );
+    s.querySelector<HTMLInputElement>('[data-tips]')!.addEventListener('change', (e) => {
+      cur.tips = (e.target as HTMLInputElement).checked;
+      onChange({ ...cur });
+    });
+    s.querySelector('[data-reset-tips]')!.addEventListener('click', () => {
+      resetTips();
+      this.log('Подсказки будут показаны снова.');
+    });
+    s.querySelector('#set-back')!.addEventListener('click', onBack);
+  }
+
+  private tipTimer = 0;
+
+  showTip(text: string) {
+    const t = $('tip');
+    t.innerHTML = `<b>ПОДСКАЗКА</b><div>${esc(text)}</div><span class="tip-close">×</span>`;
+    t.classList.remove('hidden');
+    t.querySelector('.tip-close')!.addEventListener('click', () => t.classList.add('hidden'));
+    this.tipTimer = 14;
   }
 
   showCreation(onDone: (c: Character) => void) {

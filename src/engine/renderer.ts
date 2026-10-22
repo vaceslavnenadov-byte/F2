@@ -145,6 +145,22 @@ export class Renderer {
     this.resize();
   }
 
+  /** Пресет качества: плотность пикселей, разрешение теней, свечение. */
+  applyQuality(q: 'low' | 'medium' | 'high') {
+    const dpr = window.devicePixelRatio || 1;
+    const ratio = q === 'low' ? Math.min(dpr, 1) * 0.75 : q === 'medium' ? Math.min(dpr, 1.25) : Math.min(dpr, 2);
+    const shadow = q === 'low' ? 1024 : q === 'medium' ? 1536 : 2048;
+    this.renderer.setPixelRatio(ratio);
+    if (this.sun.shadow.mapSize.x !== shadow) {
+      this.sun.shadow.mapSize.set(shadow, shadow);
+      this.sun.shadow.map?.dispose();
+      this.sun.shadow.map = null;
+    }
+    this.renderer.shadowMap.needsUpdate = true;
+    this.bloom.enabled = q !== 'low';
+    this.resize();
+  }
+
   /** Тень следует за точкой интереса (игроком), чтобы карта теней оставалась чёткой. */
   followShadow(target: THREE.Vector3) {
     this.sun.target.position.copy(target);
