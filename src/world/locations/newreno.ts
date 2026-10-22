@@ -4,6 +4,7 @@ import { jitter } from '../world';
 import type { LocationDef } from './types';
 import type { Game } from '../../game/game';
 import { boxer, cassidy, gangster, human, SKIN } from '../../game/bestiary';
+import { highwayman } from '../props';
 
 const EXIT = { x: 56, z: 0, r: 4 };
 export const RING = { x: 6, z: 20 };
@@ -141,6 +142,28 @@ function build(w: World, flags: Set<string>) {
       w.group.add(l);
     }
   }
+  // Гараж Смитти: навес, верстак и разбитый «Хайвеймен».
+  const garage = new THREE.Group();
+  const roof = new THREE.Mesh(new THREE.BoxGeometry(8, 0.2, 7), w.mat.tin);
+  roof.position.y = 3.4;
+  garage.add(roof);
+  for (const [px, pz] of [[-3.8, -3.3], [3.8, -3.3], [-3.8, 3.3], [3.8, 3.3]]) {
+    const post = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 3.4, 6), w.mat.metal);
+    post.position.set(px, 1.7, pz);
+    garage.add(post);
+  }
+  const bench = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.9, 0.8), w.mat.darkWood);
+  bench.position.set(-2.4, 0.45, -2.9);
+  garage.add(bench);
+  w.place(garage, 42, 16, 0, 0);
+  for (const [px, pz] of [[-3.8, -3.3], [3.8, -3.3], [-3.8, 3.3], [3.8, 3.3]]) w.nav.blockCircle(42 + px, 16 + pz, 0.4);
+  w.nav.blockRect(39.6, 13.1, 1.3, 0.5);
+  if (!flags.has('carOwned')) {
+    const car = highwayman(w, true);
+    w.place(car, 43, 17, 2.8, 0);
+    w.nav.blockRect(43, 17, 1.2, 2.7, 2.8);
+    w.interactable({ id: 'brokenCar', name: 'Разбитый «Хайвеймен»', object: car, approach: new THREE.Vector3(40.5, 0, 19) });
+  }
   w.place(w.carWreck(1100), -6, 6, 1.5, 0.1);
   w.nav.blockRect(-6, 6, 1.1, 2.3, 1.5);
   w.burningBarrel(40, 4);
@@ -155,6 +178,7 @@ function spawn(g: Game) {
   const next = [0, 1, 2].find((i) => !g.flags.has(`boutWon${i}`));
   if (next !== undefined) add(boxer(`boxer${next}`, bouts[next], next), RING.x + 2, RING.z + 1);
   if (!g.isJoined('cassidy')) add(cassidy(), 16, -6.5);
+  add(human('smitty', 'Механик Смитти', { skin: SKIN.a, cloth: '#3a3a40', hair: '#3a2a1a', top: '#4a5a6a', build: 1.05 }, 'none', { dialogue: 'smitty' }), 38.5, 19.5);
   add(human('barkeep', 'Бармен Хэнк', { skin: SKIN.a, cloth: '#3a3028', hair: '#2a1a10', top: '#5a4a3a' }, 'none', { dialogue: 'renoBar' }), 19, -6.8);
   const morelli = gangster('morelli', 'morelli');
   morelli.name = 'Луиджи Морелли';

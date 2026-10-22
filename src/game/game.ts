@@ -20,6 +20,8 @@ import { DIALOGUES, resolveText, type DialogueDef, type DialogueOption } from '.
 import { QUESTS, QUEST_GOALS, type QuestState } from './quests';
 import { dog as makeDog, sulik as makeSulik, cassidy as makeCassidy, marcus as makeMarcus, colonel } from './bestiary';
 import { OIL_RIG, RIG_DOCK, RIG_SOLDIERS } from '../world/locations/oilrig';
+import { highwayman } from '../world/props';
+import { SIERRA_GUARDS } from '../world/locations/sierra';
 import { NAVARRO_SOLDIERS } from '../world/locations/navarro';
 import { MORELLI_IDS, CARVER_IDS } from '../world/locations/newreno';
 import { UI } from '../ui/ui';
@@ -67,6 +69,8 @@ interface SaveData {
   questKills: Record<string, number>;
   traders: Record<string, Record<string, number>>;
   karma?: number;
+  carFuel?: number;
+  trunk?: Record<string, number>;
 }
 
 export class Game {
@@ -211,7 +215,8 @@ export class Game {
   get party() { return this.actors.filter((a) => this.isInParty(a)); }
 
   enterLocation(def: LocationDef, entry: string, at?: [number, number]) {
-    const party = this.actors.filter((a) => this.isInParty(a));
+    // Союзники на время войны семей остаются в Нью-Рино.
+    const party = this.actors.filter((a) => this.isInParty(a) && a.tag !== 'warAlly');
     for (const a of this.actors) {
       a.stop();
       this.r.scene.remove(a.object);
@@ -259,6 +264,7 @@ export class Game {
     party.forEach((a, i) => this.addActor(a, x + Math.cos(i * 2 + 1) * 1.8, z + Math.sin(i * 2 + 1) * 1.8));
     def.spawn(this);
     this.spawnWaitingCompanions(def.id);
+    this.parkCar(def);
     this.camTarget.copy(this.player.pos);
     this.exitArmed = false;
   }
@@ -298,6 +304,7 @@ export class Game {
       discovered: [...this.discovered],
       here,
       onDiscover: (id) => this.discover(id),
+      vehicle: this.flags.has('carOwned') ? { fuel: this.carFuel, onFuel: (f) => (this.carFuel = f) } : undefined,
       dateText: (d) => this.dateText(d, true),
       encounterCheck: (dist) => {
         encounterBudget += dist;
@@ -410,6 +417,8 @@ export class Game {
       questKills: this.questKills,
       traders: this.traders,
       karma: this.karma,
+      carFuel: this.carFuel,
+      trunk: this.trunk,
     };
     try {
       localStorage.setItem(Game.slotKey(slot), JSON.stringify(data));
@@ -481,6 +490,8 @@ export class Game {
     this.questKills = d.questKills;
     this.traders = d.traders ?? {};
     this.karma = d.karma ?? 0;
+    this.carFuel = d.carFuel ?? 0;
+    this.trunk = d.trunk ?? {};
     // Восстанавливаем отряд до входа в локацию, чтобы он появился рядом с игроком.
     const restored: Actor[] = [];
     if (this.flags.has('dogFound') && this.quests.dog?.state !== 'rewarded' && !this.flags.has('dogDead')) restored.push(this.dog);
@@ -993,6 +1004,7 @@ export class Game {
       const n = randInt(min, max);
       if (n > 0) this.giveItem(id, n);
     }
+    if ((target.id === 'carver' || target.id === 'morelli') && this.flags.has('nrWar') && !this.flags.has('nrWarWon')) this.endFamilyWar();
     if (target.tag === 'boxer') {
       const n = Number(target.id.replace('boxer', ''));
       this.flags.add(`boutWon${n}`);
@@ -1107,6 +1119,51 @@ export class Game {
     const sci = this.char.skill('science');
     const card = this.inv.count('keycard') > 0;
     switch (it.id) {
+      case 'sierraSecurity':
+        if (this.flags.has('sierraSecurityOff')) this.ui.log('Охранная система отключена.');
+        else if (sci >= 60) {
+          this.ui.log('ОХРАННЫЙ ПРОТОКОЛ… ОТМЕНЁН. Роботы и турели замирают один за другим. [Наука]', 'good');
+          this.disableSierraGuards();
+        } else {
+          this.ui.log('НЕВЕРНЫЙ ПАРОЛЬ. ТРЕВОГА! (нужна Наука 60)', 'bad');
+          for (const a of this.actors) if (SIERRA_GUARDS.includes(a.id) && !a.dead) a.detectRadius = 40;
+        }
+        break;
+      case 'sierraGenerator':
+        if (this.flags.has('sierraPower')) this.ui.log('Генератор гудит ровно.');
+        else if (this.char.skill('repair') >= 50 || this.inv.count('microcell') >= 2) {
+          const bySkill = this.char.skill('repair') >= 50;
+          if (!bySkill) this.inv.remove('microcell', 2);
+          this.flags.add('sierraPower');
+          this.advanceQuest('sierra', 1);
+          this.addXp(bySkill ? 400 : 200);
+          this.ui.log(bySkill ? 'Вы чините генератор. Где-то с лязгом откатывается гермодверь арсенала. [Ремонт]' : 'Две батареи заводят генератор вручную. Гермодверь арсенала откатывается.', 'good');
+          this.ui.banner('ПИТАНИЕ ВОССТАНОВЛЕНО', 2);
+        } else this.ui.log('Генератор мёртв. Нужен Ремонт 50 — или две микроядерные батареи, чтобы завести его вручную.', 'warn');
+        break;
+      case 'sierraArmory':
+        if (!this.flags.has('sierraPower')) {
+          this.ui.log('Ящики за решёткой арсенала. Решётка открывается только при работающем генераторе.', 'warn');
+          break;
+        }
+        this.flags.add('sierraLooted');
+        for (const [id, n] of [['injector', 1], ['combatArmor', 1], ['microcell', 10], ['stimpak', 3], ['caps', 300]] as const) this.giveItem(id, n);
+        this.advanceQuest('sierra', 2);
+        if (this.quests.sierra) this.quests.sierra.state = 'rewarded';
+        this.addXp(600);
+        this.removeFromWorld('sierraArmory');
+        break;
+      case 'car':
+        this.ui.openTrunk();
+        break;
+      case 'brokenCar':
+        if (this.flags.has('carOwned')) break;
+        if (!this.inv.count('injector')) this.ui.log('Старый «Хайвеймен». Двигатель цел, но сгорел топливный инжектор. Смитти говорит, такой можно найти на армейском складе Сьерра.', 'warn');
+        else if (this.char.skill('repair') >= 50) {
+          this.ui.log('Вы ставите новый инжектор и подключаете проводку. Мотор кашляет — и оживает! [Ремонт]', 'good');
+          this.fixCar(false);
+        } else this.ui.log('Инжектор есть, но самому не справиться (Ремонт 50). Попроси Смитти.', 'warn');
+        break;
       case 'carverSafe': {
         if (this.flags.has('ledgerTaken')) break;
         // Охрана рядом — заметят.
@@ -1393,8 +1450,12 @@ export class Game {
     slides.push(f.has('reactorFixed')
       ? 'Убежище-Сити и Гекко заключили хрупкий мир: чистая энергия гулей в обмен на лекарства граждан.'
       : 'Ссора Убежище-Сити и Гекко переросла в войну, и ни один из городов так и не оправился.');
-    if (f.has('sidedMorelli')) slides.push('Без бухгалтерии Карвер быстро пал. Нью-Рино стал вотчиной семьи Морелли — и ещё на шаг ближе к тому, чтобы стать столицей пороков всей пустоши.');
+    if (f.has('nrWarWon')) slides.push(f.has('sidedMorelli')
+      ? 'Война семей закончилась быстро. Джек Карвер лёг в песок, и Нью-Рино целиком достался Морелли. Говорят, на стене казино до сих пор висит твой портрет.'
+      : 'В войне семей Луиджи Морелли пал. Карвер правил Нью-Рино железной рукой и помнил, кому обязан короной.');
+    else if (f.has('sidedMorelli')) slides.push('Без бухгалтерии Карвер быстро пал. Нью-Рино стал вотчиной семьи Морелли — и ещё на шаг ближе к тому, чтобы стать столицей пороков всей пустоши.');
     else if (f.has('sidedCarver')) slides.push('Семья Карвер вернула свои книги и вытеснила Морелли. Новый порядок в Нью-Рино оказался ничуть не лучше старого.');
+    if (f.has('carOwned')) slides.push('«Хайвеймен» ещё долго колесил по дорогам пустоши. Смитти до старости хвастал, что это он поставил ему сердце.');
     if (this.quests.scorpions?.state === 'rewarded') slides.push('Шахта Брокен-Хиллз снова давала руду. Город, где люди, гули и мутанты живут вместе, процветал назло всем предсказаниям.');
     if (f.has('clawsAllow')) slides.push('Когти смерти Убежища 13 жили тихо. Путники рассказывали о разумных чудовищах, которые не трогают людей.');
     else if (f.has('deathclawsHostile')) slides.push('Убежище 13 опустело навсегда. Ветер гоняет пыль по его залам.');
@@ -1466,6 +1527,38 @@ export class Game {
       this.giveItem('brassKnuckles');
       if (this.quests.boxing) this.quests.boxing.state = 'rewarded';
       this.ui.banner('ЧЕМПИОН НЬЮ-РИНО', 2.5);
+    }
+  }
+
+  /** Война семей: боевики союзной семьи идут за героем, соперники нападают. */
+  startFamilyWar(side: 'morelli' | 'carver') {
+    this.flags.add('nrWar');
+    const allies = side === 'morelli' ? MORELLI_IDS : CARVER_IDS;
+    for (const a of this.actors) {
+      if (!allies.includes(a.id) || a.dead || a.id === side) continue;
+      a.faction = 'companion';
+      a.follow = this.player;
+      a.tag = 'warAlly';
+      a.wanderRadius = 0;
+    }
+    this.closeDialogue();
+    this.ui.banner('ВОЙНА СЕМЕЙ', 2.5);
+    this.ui.log(`Боевики ${side === 'morelli' ? 'Морелли' : 'Карвера'} идут за тобой. Глава враждебной семьи должен умереть.`, 'warn');
+    this.makeHostile(side === 'morelli' ? 'carver' : 'morelli');
+    for (const a of this.actors) if ((side === 'morelli' ? CARVER_IDS : MORELLI_IDS).includes(a.id) && !a.dead) a.detectRadius = 40;
+  }
+
+  private endFamilyWar() {
+    this.flags.add('nrWarWon');
+    this.ui.banner('НЬЮ-РИНО ВЗЯТ', 2.5);
+    this.ui.log('Глава враждебной семьи убит. Вернись к своему боссу за наградой.', 'warn');
+    for (const a of this.actors) {
+      if (a.tag !== 'warAlly' || a.dead) continue;
+      a.follow = null;
+      a.faction = 'villager';
+      a.tag = undefined;
+      a.home.copy(a.pos);
+      a.wanderRadius = 3;
     }
   }
 
@@ -1823,6 +1916,71 @@ export class Game {
         p.hp = this.char.hp;
       }
     }
+  }
+
+  // ─── Машина ────────────────────────────────────────────────────────────────
+
+  carFuel = 0;
+  trunk: Record<string, number> = {};
+
+  /** Машина ждёт у въезда в любую локацию, куда на ней приехали. */
+  private parkCar(def: LocationDef) {
+    if (!this.flags.has('carOwned') || def.id === 'oilrig' || def.indoor) return;
+    const [ex, ez] = def.entries.world ?? def.entries.default;
+    // Ставим машину рядом с точкой въезда, на проходимой клетке.
+    const cell = this.nav.nearestWalkable(...this.nav.cellOf(ex + 4, ez + 3));
+    if (!cell) return;
+    const p = this.nav.center(cell[0], cell[1]);
+    const rot = Math.atan2(-ex, -ez);
+    const car = highwayman(this.world);
+    this.world.place(car, p.x, p.z, rot, 0);
+    this.nav.blockRect(p.x, p.z, 1.2, 2.7, rot);
+    this.world.interactable({ id: 'car', name: 'Хайвеймен', object: car, approach: new THREE.Vector3(p.x + 2, 0, p.z) });
+  }
+
+  refuelCar() {
+    if (this.carFuel >= 100) {
+      this.ui.log('Бак полон.');
+      return;
+    }
+    if (!this.inv.remove('microcell')) {
+      this.ui.log('Нужна микроядерная батарея.', 'warn');
+      return;
+    }
+    this.carFuel = Math.min(100, this.carFuel + 20);
+    this.ui.log(`Заряд машины: ${Math.round(this.carFuel)}%.`, 'good');
+  }
+
+  /** Ремонт машины: инжектор + Ремонт 50 (или механик за плату). */
+  fixCar(byMechanic: boolean) {
+    this.inv.remove('injector');
+    this.flags.add('carOwned');
+    this.carFuel = Math.max(this.carFuel, 40);
+    this.addXp(byMechanic ? 300 : 500);
+    this.ui.banner('МАШИНА НА ХОДУ', 2.5);
+    this.ui.log('«Хайвеймен» снова на ходу! На карте мира он везёт в 2,5 раза быстрее. Заряд пополняется микроядерными батареями.', 'good');
+    this.removeFromWorld('brokenCar');
+    if (this.quests.car) this.quests.car.state = 'rewarded';
+    this.parkCar(this.location);
+  }
+
+  /** Отключение охраны Сьерры: роботы и турели замирают. */
+  private disableSierraGuards() {
+    this.flags.add('sierraSecurityOff');
+    this.addXp(400);
+    for (const a of this.actors) {
+      if (!SIERRA_GUARDS.includes(a.id) || a.dead) continue;
+      a.dead = true;
+      a.stop();
+      a.rig.playDeath();
+    }
+  }
+
+  private removeFromWorld(id: string) {
+    const it = this.world.interactables.find((i) => i.id === id);
+    if (!it) return;
+    it.object.visible = false;
+    this.removeInteractable(it);
   }
 
   // ─── Меню паузы, настройки, подсказки ──────────────────────────────────────

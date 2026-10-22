@@ -134,6 +134,7 @@ export const ITEMS: Record<string, ItemDef> = {
     desc: 'Тяжёлый кастет с ринга Нью-Рино. Удар без оружия, но с весом.',
     weapon: { skill: 'unarmed', dmg: [4, 10], ap: 3, range: 1.5, melee: true, visual: 'none' },
   },
+  injector: { id: 'injector', name: 'Топливный инжектор', kind: 'misc', value: 300, desc: 'Довоенная деталь двигателя в армейской упаковке. Подходит к «Хайвеймену».' },
   ledger: { id: 'ledger', name: 'Бухгалтерия Карвера', kind: 'misc', value: 0, desc: 'Толстая книга с долгами и взятками семьи Карвер.' },
   regulator: { id: 'regulator', name: 'Регулятор потока', kind: 'misc', value: 0, desc: 'Тяжёлая деталь реактора, обмотанная изолентой. Нужна в Гекко.' },
   v13coords: { id: 'v13coords', name: 'Голодиск Убежища 8', kind: 'misc', value: 0, desc: 'Голодиск с координатами довоенных убежищ, включая Убежище 13.' },

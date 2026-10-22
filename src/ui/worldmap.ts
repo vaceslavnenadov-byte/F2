@@ -7,6 +7,8 @@ export interface WorldMapOpts {
   discovered: string[];
   /** Город, в котором сейчас стоит игрок (null — посреди пустоши). */
   here: string | null;
+  /** Машина: пока есть топливо, путь в 2.5 раза быстрее, встреч меньше. */
+  vehicle?: { fuel: number; onFuel: (fuel: number) => void };
   /** Проезжая рядом с неизвестным местом, игрок его замечает. */
   onDiscover?: (id: string) => void;
   dateText: (days: number) => string;
@@ -122,7 +124,7 @@ export function showWorldMap(container: HTMLElement, o: WorldMapOpts): () => voi
   const date = container.querySelector<HTMLElement>('.wm-date')!;
 
   const renderSide = () => {
-    date.textContent = o.dateText(days);
+    date.textContent = o.dateText(days) + (o.vehicle ? ` · топливо ${Math.round(o.vehicle.fuel)}%` : '');
     if (travel) {
       info.textContent = `В пути: ${WORLD_MAP[travel.to].label}…`;
       list.innerHTML = '';
@@ -140,7 +142,7 @@ export function showWorldMap(container: HTMLElement, o: WorldMapOpts): () => voi
       if (id === here) continue;
       const d = Math.hypot(WORLD_MAP[id].x - pos.x, WORLD_MAP[id].y - pos.y);
       const b = document.createElement('button');
-      b.textContent = `${WORLD_MAP[id].label} — ${Math.max(1, Math.round(d * DAYS_PER_UNIT))} дн.`;
+      b.textContent = `${WORLD_MAP[id].label} — ${Math.max(1, Math.round((d * DAYS_PER_UNIT) / (o.vehicle && o.vehicle.fuel > 0 ? 2.5 : 1)))} дн.`;
       b.addEventListener('click', () => go(id));
       list.appendChild(b);
     }
@@ -214,14 +216,21 @@ export function showWorldMap(container: HTMLElement, o: WorldMapOpts): () => voi
     const dt = Math.min(0.05, (now - last) / 1000);
     last = now;
     if (travel) {
-      const step = dt * 9;
+      const drive = !!o.vehicle && o.vehicle.fuel > 0;
+      const speed = drive ? 2.5 : 1;
+      const step = dt * 9 * speed;
       const prev = travel.t;
       travel.t = Math.min(travel.len, travel.t + step);
+      if (drive) {
+        o.vehicle!.fuel = Math.max(0, o.vehicle!.fuel - (travel.t - prev) * 1.1);
+        o.vehicle!.onFuel(o.vehicle!.fuel);
+        if (o.vehicle!.fuel <= 0) info.textContent = 'Топливо кончилось — дальше пешком.';
+      }
       const t = WORLD_MAP[travel.to];
       const k = travel.len > 0 ? travel.t / travel.len : 1;
       pos.x = travel.from.x + (t.x - travel.from.x) * k;
       pos.y = travel.from.y + (t.y - travel.from.y) * k;
-      days += (travel.t - prev) * DAYS_PER_UNIT;
+      days += ((travel.t - prev) * DAYS_PER_UNIT) / speed;
       date.textContent = o.dateText(days);
       for (const [id, p] of Object.entries(WORLD_MAP)) {
         if (!o.discovered.includes(id) && Math.hypot(p.x - pos.x, p.y - pos.y) < 7) {
@@ -233,7 +242,7 @@ export function showWorldMap(container: HTMLElement, o: WorldMapOpts): () => voi
         here = travel.to;
         travel = null;
         renderSide();
-      } else if (travel.t > 3 && travel.len - travel.t > 3 && o.encounterCheck(travel.t - prev)) {
+      } else if (travel.t > 3 && travel.len - travel.t > 3 && o.encounterCheck((travel.t - prev) / speed)) {
         travel = null;
         finish(() => o.onEncounter({ ...pos }, days));
         return;

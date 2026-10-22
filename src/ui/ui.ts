@@ -19,6 +19,7 @@ const LOCATION_NOTES: Record<string, string> = {
   gecko: 'Станция — к востоку. Пульт реактора — у входа. Двор с отходами за станцией радиоактивен: следи за дозой.',
   vault13: 'Прихожая, атриум с колонной, каюты на севере, логово на юге. Кабинет смотрителя — на востоке.',
   den: 'Гильдия работорговцев — на севере. Клетка с пленником — рядом. В юго-восточном переулке опасно. Выход — на запад.',
+  sierra: 'Командный бункер с терминалом охраны — на западе. Генераторная — на востоке. Арсенал — в склоне горы на севере, за турелями.',
 };
 
 interface Floater {
@@ -32,7 +33,7 @@ interface Floater {
   offset?: number;
 }
 
-export type PanelKind = 'inv' | 'cha' | 'pip' | 'trade';
+export type PanelKind = 'inv' | 'cha' | 'pip' | 'trade' | 'trunk';
 
 export class UI {
   private floaters: Floater[] = [];
@@ -229,6 +230,8 @@ export class UI {
     this.renderPanel();
   }
 
+  openTrunk() { this.openPanel('trunk'); }
+
   openTrade(id: string) {
     this.trade = { id, mine: new Map(), theirs: new Map() };
     this.openPanel('trade');
@@ -246,6 +249,7 @@ export class UI {
     if (this.panel === 'inv') p.innerHTML = this.inventoryHtml();
     else if (this.panel === 'cha') p.innerHTML = this.characterHtml();
     else if (this.panel === 'trade') p.innerHTML = this.tradeHtml();
+    else if (this.panel === 'trunk') p.innerHTML = this.trunkHtml();
     else p.innerHTML = this.pipboyHtml();
     p.querySelector('[data-close]')?.addEventListener('click', () => this.closePanel());
     p.querySelectorAll<HTMLElement>('[data-item]').forEach((el) =>
@@ -295,6 +299,30 @@ export class UI {
         this.renderPanel();
       }),
     );
+    // Багажник: перенос по одному (крышки — по 10), Shift — всё.
+    p.querySelectorAll<HTMLElement>('[data-trunk]').forEach((el) =>
+      el.addEventListener('click', (e) => {
+        const g = this.game;
+        const [dir, id] = el.dataset.trunk!.split(':');
+        const have = dir === 'in' ? g.inv.count(id) : g.trunk[id] ?? 0;
+        const n = Math.min(have, (e as MouseEvent).shiftKey ? Infinity : id === 'caps' ? 10 : 1);
+        if (n <= 0) return;
+        if (dir === 'in') {
+          g.inv.remove(id, n);
+          g.trunk[id] = (g.trunk[id] ?? 0) + n;
+        } else {
+          g.trunk[id] -= n;
+          if (g.trunk[id] <= 0) delete g.trunk[id];
+          g.inv.add(id, n);
+        }
+        this.updateHud();
+        this.renderPanel();
+      }),
+    );
+    p.querySelector('[data-refuel]')?.addEventListener('click', () => {
+      this.game.refuelCar();
+      this.renderPanel();
+    });
     p.querySelector('[data-deal]')?.addEventListener('click', () => {
       const t = this.trade;
       if (t && this.game.completeTrade(t.id, t.mine, t.theirs)) {
@@ -387,6 +415,24 @@ export class UI {
           <div class="row"><span>КБ / Порог / Сопр.</span><span class="v">${g.playerAC} / ${g.playerArmor.dt} / ${Math.round(g.playerArmor.dr * 100)}%</span></div>
           <div class="row"><span>Здоровье</span><span class="v">${g.char.hp}/${g.char.maxHp}</span></div>
         </div>
+      </div>`;
+  }
+
+  private trunkHtml(): string {
+    const g = this.game;
+    const row = (dir: string, id: string, n: number) =>
+      `<div class="item" data-trunk="${dir}:${id}"><span>${esc(ITEMS[id].name)}</span><span>×${n}</span></div>`;
+    const bag = [...g.inv.items.entries()].map(([id, n]) => row('in', id, n)).join('') || '<div class="desc">Пусто</div>';
+    const trunk = Object.entries(g.trunk).map(([id, n]) => row('out', id, n)).join('') || '<div class="desc">Пусто</div>';
+    return `
+      <div class="panel-title"><span>«ХАЙВЕЙМЕН»</span><button data-close>Закрыть</button></div>
+      <div class="panel-cols">
+        <div class="box crt"><h3>Сумка → багажник</h3>${bag}</div>
+        <div class="box crt"><h3>Багажник → сумка</h3>${trunk}</div>
+      </div>
+      <div class="actions" style="justify-content:space-between;align-items:center">
+        <span class="desc" style="margin:0">Заряд: ${Math.round(g.carFuel)}% · батарей в сумке: ${g.inv.count('microcell')} · клик — 1 шт., Shift — всё</span>
+        <button data-refuel>Зарядить (1 батарея = 20%)</button>
       </div>`;
   }
 

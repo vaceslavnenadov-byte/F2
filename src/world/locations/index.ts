@@ -9,6 +9,7 @@ import { NAVARRO } from './navarro';
 import { OIL_RIG } from './oilrig';
 import { NEW_RENO } from './newreno';
 import { BROKEN_HILLS } from './brokenhills';
+import { SIERRA } from './sierra';
 import type { LocationDef } from './types';
 
 export const LOCATIONS: Record<string, LocationDef> = {
@@ -23,6 +24,7 @@ export const LOCATIONS: Record<string, LocationDef> = {
   oilrig: OIL_RIG,
   newreno: NEW_RENO,
   brokenhills: BROKEN_HILLS,
+  sierra: SIERRA,
 };
 
 /** Положение городов на карте мира (условные единицы 0..100). */
@@ -37,6 +39,7 @@ export const WORLD_MAP: Record<string, { x: number; y: number; label: string; de
   navarro: { x: 8, y: 32, label: 'Наварро', desc: 'Военная база Анклава на северном побережье.' },
   newreno: { x: 57, y: 37, label: 'Нью-Рино', desc: 'Город неона, казино и гангстерских семей.' },
   brokenhills: { x: 73, y: 46, label: 'Брокен-Хиллз', desc: 'Урановый рудник, где люди, гули и мутанты живут вместе.' },
+  sierra: { x: 52, y: 18, label: 'Склад Сьерра', desc: 'Довоенный армейский склад в горах. Охраняется роботами.' },
 };
 
 /** Береговая линия на карте мира: западнее — океан. */

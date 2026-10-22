@@ -840,3 +840,78 @@ export class TurretRig extends Rig {
     this.setupAnimations(this.root, TURRET_CLIPS);
   }
 }
+
+// ─── Робот-охранник ─────────────────────────────────────────────────────────
+
+let ROBOT_CLIPS: THREE.AnimationClip[] | null = null;
+
+/** Охранный робот на гусеницах: корпус с куполом-«мозгом» и две руки-пушки. */
+export class RobotRig extends Rig {
+  readonly height = 2.1;
+
+  constructor() {
+    super();
+    this.cycleDistance = 1.6;
+    const steel = std('#5a5e58', 0.45, 0.75);
+    const dark = std('#2a2c2c', 0.6, 0.6);
+    const base = new THREE.Group();
+    base.name = 'chassis';
+    for (const sx of [-1, 1]) {
+      const tread = new THREE.Mesh(new THREE.CapsuleGeometry(0.22, 0.9, 4, 10), dark);
+      tread.rotation.x = Math.PI / 2;
+      tread.position.set(sx * 0.45, 0.25, 0);
+      base.add(tread);
+    }
+    const hull = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.35, 1), steel);
+    hull.position.y = 0.45;
+    base.add(hull);
+    this.root.add(base);
+
+    const torso = new THREE.Group();
+    torso.name = 'torso';
+    torso.position.y = 0.65;
+    const body = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.5, 0.9, 16), steel);
+    body.position.y = 0.45;
+    torso.add(body);
+    const glass = new THREE.Mesh(new THREE.SphereGeometry(0.36, 18, 12, 0, Math.PI * 2, 0, Math.PI / 2), new THREE.MeshPhysicalMaterial({ color: '#a8d8e8', transparent: true, opacity: 0.35, roughness: 0.05, transmission: 0.3 }));
+    glass.position.y = 0.9;
+    const brain = new THREE.Mesh(new THREE.SphereGeometry(0.24, 14, 10), new THREE.MeshStandardMaterial({ color: '#d88a9a', emissive: '#6a2030', emissiveIntensity: 0.5, roughness: 0.7 }));
+    brain.scale.set(1, 0.75, 1.2);
+    brain.position.y = 0.98;
+    const dome = new THREE.Group();
+    dome.name = 'dome';
+    dome.add(glass, brain);
+    torso.add(dome);
+    for (const sx of [-1, 1]) {
+      const arm = new THREE.Group();
+      arm.name = sx < 0 ? 'armR' : 'armL';
+      arm.position.set(sx * 0.55, 0.6, 0);
+      const upper = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, 0.5, 8), dark);
+      upper.position.y = -0.2;
+      const gun = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.09, 0.6, 10), steel);
+      gun.rotation.x = Math.PI / 2;
+      gun.position.set(0, -0.45, 0.25);
+      const muzzle = new THREE.Mesh(new THREE.SphereGeometry(0.05, 8, 6), new THREE.MeshStandardMaterial({ color: '#f00', emissive: '#ff3010', emissiveIntensity: 2 }));
+      muzzle.position.set(0, -0.45, 0.56);
+      arm.add(upper, gun, muzzle);
+      torso.add(arm);
+    }
+    this.root.add(torso);
+    this.root.traverse((o) => ((o as THREE.Mesh).isMesh ? (o.castShadow = true) : null));
+    ROBOT_CLIPS ??= [
+      makeClip('idle', 4, { dome: [[0, 0, 0, 0], [1.5, 0, 0.6, 0], [3, 0, -0.6, 0], [4, 0, 0, 0]] }, { torso: [[0, 0, 0.65, 0], [2, 0, 0.67, 0], [4, 0, 0.65, 0]] }),
+      makeClip('walk', 1, { torso: [[0, 0, -0.05, 0], [0.5, 0, 0.05, 0], [1, 0, -0.05, 0]] }, { torso: [[0, 0, 0.65, 0], [0.25, 0, 0.68, 0], [0.5, 0, 0.65, 0], [0.75, 0, 0.68, 0], [1, 0, 0.65, 0]] }),
+      makeClip('attack', 0.45, {
+        armL: [[0, 0, 0, 0], [0.08, -0.25, 0, 0], [0.45, 0, 0, 0]],
+        armR: [[0, 0, 0, 0], [0.12, -0.25, 0, 0], [0.45, 0, 0, 0]],
+      }),
+      makeClip('hit', 0.3, { torso: [[0, 0, 0, 0], [0.1, -0.15, 0.2, 0], [0.3, 0, 0, 0]] }),
+      makeClip('death', 1, {
+        torso: [[0, 0, 0, 0], [0.4, 0.3, 0.2, 0.3], [1, 0.9, 0.3, 0.8]],
+        armL: [[0, 0, 0, 0], [1, 0.8, 0, 0.5]],
+        armR: [[0, 0, 0, 0], [1, 0.6, 0, -0.4]],
+      }, { torso: [[0, 0, 0.65, 0], [1, 0, 0.35, 0.2]] }),
+    ];
+    this.setupAnimations(this.root, ROBOT_CLIPS);
+  }
+}

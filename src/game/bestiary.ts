@@ -1,5 +1,5 @@
 import { Actor, type ActorDef } from '../entities/actor';
-import { HumanoidRig, LizardRig, QuadrupedRig, TurretRig, type HumanoidLook, type WeaponVisual } from '../entities/rigs';
+import { HumanoidRig, LizardRig, QuadrupedRig, TurretRig, RobotRig, type HumanoidLook, type WeaponVisual } from '../entities/rigs';
 import type { WeaponStats } from './items';
 
 export const ATTACKS: Record<string, WeaponStats> = {
@@ -206,5 +206,15 @@ export const FISTS_PRO: WeaponStats = { skill: 'unarmed', dmg: [3, 8], ap: 3, ra
 export function boxer(id: string, name: string, tier: number): Actor {
   return human(id, name, { skin: [SKIN.b, SKIN.pale, SKIN.c][tier % 3], cloth: ['#8a1a1a', '#1a3a8a', '#1a1a1a'][tier % 3], hair: '#141010', build: 1.1 + tier * 0.1 }, 'none', {
     hp: 30 + tier * 15, ap: 7 + tier, ac: 8 + tier * 3, skill: 55 + tier * 10, attack: { ...FISTS_PRO, dmg: [3 + tier, 8 + tier * 2] }, xp: 120 + tier * 80, dialogue: 'boxer', tag: 'boxer',
+  });
+}
+
+/** Охранный робот склада Сьерра: медленный, бронированный, бьёт лазером. */
+export function robot(id: string): Actor {
+  return new Actor({
+    id, name: 'Робот-охранник', faction: 'hostile', rig: new RobotRig(), hp: 70, ap: 8, ac: 15, skill: 65, speed: 2.4,
+    attack: { skill: 'smallGuns', dmg: [9, 18], ap: 4, range: 16, melee: false, visual: 'gun' },
+    xp: 350, sequence: 6, dt: 6, dr: 0.4, detectRadius: 13, wanderRadius: 5, tag: 'robots',
+    loot: [['microcell', 1, 4]],
   });
 }
