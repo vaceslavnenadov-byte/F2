@@ -22,6 +22,7 @@ import { dog as makeDog, sulik as makeSulik, cassidy as makeCassidy, marcus as m
 import { OIL_RIG, RIG_DOCK, RIG_SOLDIERS } from '../world/locations/oilrig';
 import { highwayman } from '../world/props';
 import { SIERRA_GUARDS } from '../world/locations/sierra';
+import { HATCH, SLAG_IDS, spawnKarl, spawnSlags } from '../world/locations/modoc';
 import { NAVARRO_SOLDIERS } from '../world/locations/navarro';
 import { MORELLI_IDS, CARVER_IDS } from '../world/locations/newreno';
 import { UI } from '../ui/ui';
@@ -1004,6 +1005,11 @@ export class Game {
       const n = randInt(min, max);
       if (n > 0) this.giveItem(id, n);
     }
+    if (target.id === 'hen' && this.flags.has('slagsHostile')) {
+      this.flags.add('karlHome');
+      this.advanceQuest('ghostfarm', 2);
+      this.ui.log('Старейшина слагов мёртв. Из темноты люка, пошатываясь, выходит Карл и молча уходит в Модок.', 'warn');
+    }
     if ((target.id === 'carver' || target.id === 'morelli') && this.flags.has('nrWar') && !this.flags.has('nrWarWon')) this.endFamilyWar();
     if (target.tag === 'boxer') {
       const n = Number(target.id.replace('boxer', ''));
@@ -1119,6 +1125,17 @@ export class Game {
     const sci = this.char.skill('science');
     const card = this.inv.count('keycard') > 0;
     switch (it.id) {
+      case 'ghostHatch':
+        if (this.flags.has('slagsMet')) {
+          this.ui.log(this.flags.has('slagsHostile') ? 'Из люка тянет сыростью. Внизу тихо.' : 'Люк в туннели слагов. Внизу горят огоньки.');
+          break;
+        }
+        this.flags.add('slagsMet');
+        this.advanceQuest('ghostfarm', 1);
+        this.ui.log('Вы отрываете доски. Из темноты люка один за другим выбираются бледные люди в лохмотьях — «призраки» фермы.', 'warn');
+        this.ui.banner('ПРИЗРАКИ', 2);
+        spawnSlags(this);
+        break;
       case 'sierraSecurity':
         if (this.flags.has('sierraSecurityOff')) this.ui.log('Охранная система отключена.');
         else if (sci >= 60) {
@@ -1455,6 +1472,8 @@ export class Game {
       : 'В войне семей Луиджи Морелли пал. Карвер правил Нью-Рино железной рукой и помнил, кому обязан короной.');
     else if (f.has('sidedMorelli')) slides.push('Без бухгалтерии Карвер быстро пал. Нью-Рино стал вотчиной семьи Морелли — и ещё на шаг ближе к тому, чтобы стать столицей пороков всей пустоши.');
     else if (f.has('sidedCarver')) slides.push('Семья Карвер вернула свои книги и вытеснила Морелли. Новый порядок в Нью-Рино оказался ничуть не лучше старого.');
+    if (f.has('modocPeace')) slides.push('Модок и слаги стали одним городом: днём — поля, ночью — кузни под землёй. На свадьбе Карла и Ребекки гуляли обе стороны.');
+    else if (f.has('karlHome')) slides.push('Ферма призраков опустела навсегда. Карл так и не простил спасителя и однажды ушёл в пустошь один.');
     if (f.has('carOwned')) slides.push('«Хайвеймен» ещё долго колесил по дорогам пустоши. Смитти до старости хвастал, что это он поставил ему сердце.');
     if (this.quests.scorpions?.state === 'rewarded') slides.push('Шахта Брокен-Хиллз снова давала руду. Город, где люди, гули и мутанты живут вместе, процветал назло всем предсказаниям.');
     if (f.has('clawsAllow')) slides.push('Когти смерти Убежища 13 жили тихо. Путники рассказывали о разумных чудовищах, которые не трогают людей.');
@@ -1528,6 +1547,21 @@ export class Game {
       if (this.quests.boxing) this.quests.boxing.state = 'rewarded';
       this.ui.banner('ЧЕМПИОН НЬЮ-РИНО', 2.5);
     }
+  }
+
+  /** Слаги нападают: Карла придётся забирать силой. */
+  slagsWar() {
+    this.turnHostile(SLAG_IDS, 'slagsHostile');
+    this.addKarma(-10);
+  }
+
+  /** Мир со слагами: Карл остаётся внизу, Модок получает соседей. */
+  makeSlagPeace() {
+    this.flags.add('slagsPeace');
+    this.advanceQuest('ghostfarm', 2);
+    this.addXp(400);
+    this.ui.log('Слаги согласны торговать с Модоком. Вернись к мэру Джо.', 'good');
+    if (!this.actors.some((a) => a.id === 'karl')) spawnKarl(this, HATCH.x - 2, HATCH.z + 3);
   }
 
   /** Война семей: боевики союзной семьи идут за героем, соперники нападают. */

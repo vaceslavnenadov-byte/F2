@@ -86,6 +86,10 @@ export const ITEMS: Record<string, ItemDef> = {
     id: 'powder', name: 'Целебный порошок', kind: 'consumable', value: 20, heal: [10, 18], useAp: 2,
     desc: 'Толчёные травы племени. Лечит раны, но туманит голову.',
   },
+  jerky: {
+    id: 'jerky', name: 'Вяленое мясо брамина', kind: 'consumable', value: 10, heal: [4, 8], useAp: 2,
+    desc: 'Жёсткое, солёное и сытное. Модок коптит его лучше всех.',
+  },
   stimpak: {
     id: 'stimpak', name: 'Стимулятор', kind: 'consumable', value: 75, heal: [15, 25], useAp: 2,
     desc: 'Довоенный шприц с лечебной смесью. Быстро затягивает раны.',
@@ -155,6 +159,7 @@ export const TRADERS: Record<string, { name: string; stock: [string, number][] }
   },
   vcdoctor: { name: 'Доктор Андерс', stock: [['caps', 400], ['stimpak', 8], ['radaway', 6], ['radx', 6]] },
   gecko: { name: 'Лорин', stock: [['caps', 250], ['radaway', 4], ['radx', 5], ['ammo10', 20], ['ammo5', 20], ['powder', 2]] },
+  balthas: { name: 'Кожевник Балтас', stock: [['caps', 450], ['leatherJacket', 2], ['leatherArmor', 1], ['jerky', 8], ['hide', 4], ['stimpak', 2], ['knife', 1]] },
   rico: { name: 'Контрабандист Рико', stock: [['caps', 700], ['fakePapers', 1], ['ammo5', 60], ['microcell', 12], ['stimpak', 6], ['radaway', 2], ['leatherArmor', 1]] },
   betty: { name: 'Бетти', stock: [['caps', 400], ['shells', 40], ['shotgun', 1], ['radaway', 3], ['radx', 3], ['stimpak', 3], ['leatherArmor', 1]] },
   renoBar: { name: 'Бар «Подкова»', stock: [['caps', 500], ['shells', 30], ['ammo10', 40], ['stimpak', 4], ['pistol10', 1], ['knife', 2]] },

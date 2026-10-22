@@ -218,3 +218,25 @@ export function robot(id: string): Actor {
     loot: [['microcell', 1, 4]],
   });
 }
+
+/** Дикая собака: худая, злая, охотится стаей. */
+export function wildDog(id: string): Actor {
+  const rig = new QuadrupedRig({ color: '#6a5a48', secondary: '#3a3028', heads: 1, bodyLen: 0.5, bodyR: 0.17, legLen: 0.36, ears: true, tailLen: 0.3 });
+  return new Actor({
+    id, name: 'Дикая собака', faction: 'hostile', rig, hp: 16, ap: 7, ac: 5, skill: 50, attack: ATTACKS.dogBite,
+    xp: 70, sequence: 9, speed: 4.4, tag: 'wdogs', wanderRadius: 5, detectRadius: 10, loot: [['hide', 0, 1]],
+  });
+}
+
+/** Слаг: потомок тех, кто пережил войну под землёй. Бледная кожа, лохмотья, щурится на свет. */
+export function slag(id: string, name: string, variant: number, def: Partial<ActorDef> = {}): Actor {
+  const looks: HumanoidLook[] = [
+    { skin: '#e2cdb8', cloth: '#3e3a36', hair: '#d8d4cc', top: '#5a5248', beard: true },
+    { skin: '#e8d4c0', cloth: '#44403a', hair: '#2a2622', build: 0.92 },
+    { skin: '#dcc6b0', cloth: '#3a3632', hair: '#6a5a4a', top: '#4a4640', build: 1.05 },
+  ];
+  return human(id, name, looks[variant % 3], variant === 0 ? 'staff' : 'spear', {
+    dialogue: 'slag', hp: 28, ap: 7, ac: 6, skill: 55, attack: ATTACKS.club, xp: 110, sequence: 7, speed: 3.3,
+    tag: 'slags', wanderRadius: 3, detectRadius: 0, loot: [['caps', 0, 15], ['powder', 0, 1]], ...def,
+  });
+}

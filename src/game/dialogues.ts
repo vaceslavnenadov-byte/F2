@@ -3,6 +3,7 @@ import { CAGE } from '../world/locations/den';
 import { CH2_DIALOGUES } from './dialogues_ch2';
 import { CH3_DIALOGUES } from './dialogues_ch3';
 import { CH4_DIALOGUES, partyOptions } from './dialogues_ch4';
+import { CH5_DIALOGUES } from './dialogues_ch5';
 
 type Text = string | ((g: Game) => string);
 
@@ -508,8 +509,8 @@ export const DIALOGUES: Record<string, DialogueDef> = {
         ],
       },
       rumors: {
-        text: 'Мецгер держит в клетке старика-торговца. А в южном переулке засели бандиты — режут всех, кто сунется. Если перебьёшь их, весь Дэн скажет спасибо.',
-        options: [{ text: 'Учту.', next: 'hello' }],
+        text: 'Мецгер держит в клетке старика-торговца. А в южном переулке засели бандиты — режут всех, кто сунется. Если перебьёшь их, весь Дэн скажет спасибо. Да, и караванщики из Модока, что к северо-востоку, болтают про какую-то ферму с призраками.',
+        options: [{ text: 'Учту.', action: (g) => g.discover('modoc'), next: 'hello' }],
       },
     },
   },
@@ -533,6 +534,7 @@ export const DIALOGUES: Record<string, DialogueDef> = {
   ...CH2_DIALOGUES,
   ...CH3_DIALOGUES,
   ...CH4_DIALOGUES,
+  ...CH5_DIALOGUES,
 
   villager: {
     start: () => 'talk',
