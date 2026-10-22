@@ -18,9 +18,19 @@ import { Inventory, ITEMS, TRADERS, priceMult, itemPrice } from './items';
 import { Combat, BODY_PARTS, AIM_AP, type BodyPart } from './combat';
 import { DIALOGUES, resolveText, type DialogueDef, type DialogueOption } from './dialogues';
 import { QUESTS, QUEST_GOALS, type QuestState } from './quests';
-import { dog as makeDog, sulik as makeSulik } from './bestiary';
+import { dog as makeDog, sulik as makeSulik, colonel } from './bestiary';
+import { OIL_RIG, RIG_DOCK, RIG_SOLDIERS } from '../world/locations/oilrig';
+import { NAVARRO_SOLDIERS } from '../world/locations/navarro';
 import { UI } from '../ui/ui';
 import { showWorldMap } from '../ui/worldmap';
+
+function plural(n: number, one: string, few: string, many: string) {
+  const m10 = n % 10;
+  const m100 = n % 100;
+  if (m10 === 1 && m100 !== 11) return one;
+  if (m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14)) return few;
+  return many;
+}
 
 const PLAYER_LOOK = { skin: '#c48a60', cloth: '#6e5038', hair: '#3a2516', build: 1.05 };
 
@@ -224,6 +234,18 @@ export class Game {
     this.locState[def.id] ??= { dead: [] };
     this.world = new World(def, this.flags);
     this.r.scene.add(this.world.group);
+    const water = this.world.water;
+    if (water) {
+      // Отражение рендерим без неба: его HDR-яркость пересвечивает зеркало до белого.
+      const reflect = water.onBeforeRender.bind(water);
+      water.onBeforeRender = (...args) => {
+        const sky = this.r.sky;
+        const was = sky.visible;
+        sky.visible = false;
+        reflect(...args);
+        sky.visible = was;
+      };
+    }
 
     const [x, z] = at ?? def.entries[entry] ?? def.entries.default;
     this.addActor(this.player, x, z);
@@ -333,6 +355,10 @@ export class Game {
   save() {
     if (this.mode !== 'explore') {
       this.ui.log('Сохраниться можно только вне боя и диалога.', 'warn');
+      return;
+    }
+    if (this.countdown !== null) {
+      this.ui.log('Не время сохраняться — реактор вот-вот рванёт!', 'bad');
       return;
     }
     const data: SaveData = {
@@ -823,6 +849,10 @@ export class Game {
       const n = randInt(min, max);
       if (n > 0) this.giveItem(id, n);
     }
+    if (target.id === 'colonel') {
+      this.flags.add('colonelDead');
+      this.ui.banner('ПОЛКОВНИК ПОВЕРЖЕН', 2.5);
+    }
     if (target.tag) {
       this.questKills[target.tag] = (this.questKills[target.tag] ?? 0) + 1;
       this.updateKillQuests();
@@ -915,7 +945,50 @@ export class Game {
   }
 
   private interactObject(it: Interactable) {
+    const sci = this.char.skill('science');
+    const card = this.inv.count('keycard') > 0;
     switch (it.id) {
+      case 'navTerminal':
+        if (this.inv.count('fobCode')) {
+          this.ui.log('Код опознавания уже у тебя.');
+        } else if (this.flags.has('navarroIn') || NAVARRO_SOLDIERS.every((id) => !this.actors.some((a) => a.id === id && !a.dead))) {
+          this.ui.log('ВОЕННАЯ СЕТЬ АНКЛАВА… Протоколы опознавания… Код «свой-чужой» для платформы скопирован.', 'good');
+          this.giveItem('fobCode');
+          this.addXp(400);
+          this.checkTanker();
+        } else this.ui.log('Терминал под охраной. Без допуска к нему не подойти.', 'warn');
+        break;
+      case 'cellTerminal':
+        if (this.flags.has('tribeFreed')) this.ui.log('Клетки открыты.');
+        else if (card || sci >= 70) {
+          this.ui.log(card ? 'Ключ-карта офицера подходит. Замки клеток щёлкают.' : 'Вы обходите защиту пульта. Замки клеток щёлкают. [Наука]', 'good');
+          this.freeTribe();
+          this.rigAlarm();
+        } else this.ui.log('Доступ только по ключ-карте офицера (или Наука 70).', 'warn');
+        break;
+      case 'turretTerminal':
+        if (this.flags.has('turretsHacked')) this.ui.log('Турели уже работают на вас.');
+        else if (card || sci >= 60) {
+          this.flags.add('turretsHacked');
+          for (const a of this.actors) {
+            if (a.id.startsWith('rigturret') && !a.dead) {
+              a.faction = 'companion';
+              a.detectRadius = 0;
+            }
+          }
+          this.ui.log('Система «свой-чужой» перепрограммирована. Турели теперь стреляют по Анклаву.', 'good');
+          this.addXp(300);
+          this.rigAlarm();
+        } else this.ui.log('Нужна ключ-карта или Наука 60.', 'warn');
+        break;
+      case 'rigReactor':
+        if (this.flags.has('rigOverload')) this.ui.log('Реактор ревёт. Беги!', 'bad');
+        else if (card || sci >= 50) {
+          if (!this.flags.has('tribeFreed')) this.ui.log('Племя всё ещё в клетке… Но времени нет.', 'bad');
+          this.overloadReactor();
+          this.rigAlarm();
+        } else this.ui.log('Защита реактора: нужна ключ-карта или Наука 50.', 'warn');
+        break;
       case 'temple':
         this.ui.log('Храм Испытаний. Ты уже прошёл его — каменная дверь запечатана до следующего Избранного.');
         break;
@@ -997,6 +1070,154 @@ export class Game {
     this.radWarned = 0;
     audio.play('heal');
     this.syncAp();
+  }
+
+  // ─── Глава III ─────────────────────────────────────────────────────────────
+
+  /** Секунды до взрыва платформы (тикают вне боя). */
+  countdown: number | null = null;
+
+  /** Свой среди чужих: допуск Наварро + силовая броня, и тревога ещё не поднята. */
+  get disguisedOnRig() {
+    return this.flags.has('navarroIn') && this.inv.armor === 'powerArmor' && !this.flags.has('rigAlarm');
+  }
+
+  /** Тревога на платформе: маскировка раскрыта. */
+  rigAlarm() {
+    if (this.flags.has('rigAlarm') || this.location.id !== 'oilrig') return;
+    const wasDisguised = this.disguisedOnRig;
+    this.flags.add('rigAlarm');
+    if (!wasDisguised) return;
+    this.ui.log('ТРЕВОГА! Нарушитель на платформе! Маскировка раскрыта.', 'bad');
+    this.turnHostile(RIG_SOLDIERS);
+    for (const a of this.actors) {
+      if (a.id.startsWith('rigturret') && a.faction === 'hostile') a.detectRadius = 12;
+    }
+  }
+
+  /** Танкер готов, если есть топливо и код. */
+  checkTanker() {
+    if (this.flags.has('tankerFuel') && this.inv.count('fobCode') && (this.quests.enclave?.progress ?? 0) < 2) {
+      this.advanceQuest('enclave', 2);
+      this.ui.log('Для «Посейдона» всё готово. Возвращайся к капитану Барнаби.', 'warn');
+    }
+  }
+
+  sailToRig() {
+    this.closeDialogue();
+    // Плавание длится до ночи следующих суток — подходим к платформе в темноте.
+    this.days = Math.floor(this.days + 15 / 24) + 1 + 7 / 24;
+    this.encounterInfo = null;
+    this.enterLocation(OIL_RIG, 'world');
+    if ((this.quests.enclave?.progress ?? 0) < 3) this.advanceQuest('enclave', 3);
+    this.ui.banner('ПЛАТФОРМА АНКЛАВА', 3);
+    this.ui.log(this.disguisedOnRig
+      ? '«Посейдон» передаёт код опознавания. В силовой броне тебя принимают за своего — пока.'
+      : '«Посейдон» передаёт код опознавания, и танкер подпускают к причалу. Но на палубе чужака уже ждут.', 'warn');
+  }
+
+  freeTribe() {
+    this.flags.add('tribeFreed');
+    this.advanceQuest('enclave', 4);
+    this.addXp(800);
+    const dock = this.nav.center(...this.nav.cellOf(RIG_DOCK.x, RIG_DOCK.z));
+    for (const a of this.actors.filter((x) => x.id.startsWith('rig_'))) {
+      a.dialogue = a.id === 'rig_elder' ? 'elderRig' : 'tribeRig';
+      // Племя бежит к танкеру и поднимается на борт.
+      const path = this.nav.findPathToRange(a.cell(this.nav), this.nav.cellOf(dock.x, dock.z), 2);
+      a.speed = a.baseSpeed * 1.2;
+      if (path) {
+        void a.moveAlong(path.map(([i, j]) => this.nav.center(i, j))).then(() => {
+          if (a.id !== 'rig_elder') this.removeFromLocation(a.id);
+        });
+      }
+    }
+    // Клетка открыта.
+    this.nav.unblockCircle(0, -25, 6);
+    this.ui.banner('ПЛЕМЯ СВОБОДНО', 2.5);
+  }
+
+  overloadReactor() {
+    this.flags.add('rigOverload');
+    this.countdown = 150;
+    this.advanceQuest('enclave', 5);
+    this.addXp(500);
+    this.ui.banner('РЕАКТОР ПЕРЕГРУЖЕН', 3);
+    this.ui.log('Сирены воют по всей платформе. До взрыва 150 секунд. Беги к причалу!', 'bad');
+    this.spawnColonel();
+  }
+
+  /** Командир платформы перекрывает путь к причалу. */
+  spawnColonel() {
+    if (this.actors.some((a) => a.id === 'colonel') || this.flags.has('colonelDead')) return;
+    const c = colonel();
+    c.faction = 'hostile';
+    c.detectRadius = 16;
+    const a = this.spawn(c, RIG_DOCK.x - 6, RIG_DOCK.z - 2, 0.8);
+    if (a) this.ui.log('На причале появляется Полковник Стракс в улучшенной силовой броне.', 'bad');
+  }
+
+  private tickCountdown(dt: number) {
+    if (this.countdown === null || this.location.id !== 'oilrig') return;
+    if (this.mode !== 'explore') return;
+    const before = Math.ceil(this.countdown);
+    this.countdown -= dt;
+    if (Math.ceil(this.countdown) !== before && before % 30 === 0) this.ui.log(`До взрыва: ${before} с.`, 'bad');
+    if (this.countdown <= 0) {
+      this.countdown = null;
+      this.ui.banner('ВЗРЫВ', 2);
+      this.r.danger = 1;
+      this.char.hp = 0;
+      this.player.hp = 0;
+      this.player.dead = true;
+      this.player.rig.playDeath();
+      this.gameOver();
+    }
+  }
+
+  /** Выход с платформы через причал. */
+  leaveRig() {
+    if (this.flags.has('rigOverload')) {
+      this.countdown = null;
+      this.flags.add('rigDestroyed');
+      this.quests.enclave.progress = 6;
+      this.quests.enclave.state = 'rewarded';
+      this.mode = 'menu';
+      this.ui.showHud(false);
+      audio.play('quest');
+      this.ui.showEnding(this.endingSlides(), () => {
+        this.enterLocation(LOCATIONS.sanfran, 'dock');
+        this.mode = 'explore';
+        this.ui.showHud(true);
+        this.ui.log('Платформы больше нет. Пустошь открыта — свободная игра.', 'good');
+      });
+      return;
+    }
+    this.enterLocation(LOCATIONS.sanfran, 'dock');
+    this.ui.log('«Посейдон» вернулся в порт Сан-Франциско.');
+  }
+
+  private endingSlides(): string[] {
+    const f = this.flags;
+    const slides: string[] = [];
+    slides.push('Реактор платформы вспыхнул над океаном. Огненный столб видели даже в Кламате. Анклав на западном побережье перестал существовать.' +
+      (f.has('colonelDead') ? ' Полковник Стракс так и не покинул причал.' : ''));
+    slides.push(f.has('tribeFreed')
+      ? '«Посейдон» доставил жителей Арройо домой. ГЭКК превратил выжженную долину в зелёный сад — впервые за сто лет здесь шёл урожай.'
+      : 'Племя погибло вместе с платформой. ГЭКК подарил долине жизнь — но встречать её было уже некому.');
+    const fates: string[] = [];
+    if (this.quests.dog?.state === 'rewarded' && !this.dog.dead) fates.push('Дымок дожил до седой морды у очага Нагора.');
+    if (f.has('sulikJoined') && !f.has('sulikDead')) fates.push('Сулик вернулся в своё племя с рассказами о походах. Дедушка, говорят, одобрил.');
+    if (f.has('vicFree')) fates.push('Вик открыл лавку в Убежище-Сити и до старости торговал с племенем Арройо.');
+    if (fates.length) slides.push(fates.join(' '));
+    slides.push(f.has('reactorFixed')
+      ? 'Убежище-Сити и Гекко заключили хрупкий мир: чистая энергия гулей в обмен на лекарства граждан.'
+      : 'Ссора Убежище-Сити и Гекко переросла в войну, и ни один из городов так и не оправился.');
+    if (f.has('clawsAllow')) slides.push('Когти смерти Убежища 13 жили тихо. Путники рассказывали о разумных чудовищах, которые не трогают людей.');
+    else if (f.has('deathclawsHostile')) slides.push('Убежище 13 опустело навсегда. Ветер гоняет пыль по его залам.');
+    const days = Math.max(1, Math.floor(this.days));
+    slides.push(`${this.char.name} стал легендой пустоши. Уровень ${this.char.level}, побеждено врагов: ${this.kills}, ${days} ${plural(days, 'день', 'дня', 'дней')} в пути.`);
+    return slides;
   }
 
   /** Пропуск в Убежище-Сити: ворота открываются. */
@@ -1309,9 +1530,11 @@ export class Game {
     if (!nearExit) this.exitArmed = true;
     if (inExit && this.exitArmed) {
       p.stop();
-      this.openWorldMap();
+      this.exitArmed = false;
+      if (!this.location.onExit?.(this)) this.openWorldMap();
       return;
     }
+    this.location.update?.(this, dt);
 
     this.regenAcc += dt;
     if (this.regenAcc > 8) {
@@ -1405,6 +1628,7 @@ export class Game {
     if (this.location.indoor) this.r.setIndoor();
     else this.r.setTime(this.hour);
     this.radiation(dt);
+    this.tickCountdown(dt);
 
     if (this.mode === 'explore') {
       this.wasdMove(dt);
@@ -1430,7 +1654,7 @@ export class Game {
     audio.listener.z = this.camTarget.z;
     audio.updateAmbience(this.r.night, this.world.nearestFlame(this.camTarget), this.time);
     audio.setMusic(this.mode === 'combat' ? 'combat' : this.mode === 'dead' ? 'off' : 'explore');
-    this.world.update(dt, this.time, this.camTarget);
+    this.world.update(dt, this.time, this.camTarget, this.r.sunDir);
     this.effects.update(dt);
     this.ui.update(dt, this.r.camera);
     this.r.followShadow(this.camTarget);

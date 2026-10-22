@@ -365,3 +365,22 @@ button:disabled { color: #6d6252; cursor: default; }
 .aim-opt { display: flex; justify-content: space-between; padding: 2px 4px; cursor: pointer; }
 .aim-opt:hover { background: #1f5a2a66; }
 .aim-opt.off { color: #2f6a38; cursor: default; }
+
+/* ─── Глава III: таймер и эпилог ─────────────────────────────────────────── */
+
+#countdown {
+  position: absolute;
+  top: 54px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-family: var(--font-head);
+  font-size: 30px;
+  letter-spacing: 0.12em;
+  color: #ff4b3a;
+  text-shadow: 0 0 16px #ff2010, 0 2px 0 #000;
+  animation: pulse 1s infinite;
+  pointer-events: none !important;
+}
+@keyframes pulse { 50% { opacity: 0.55; } }
+.ending { max-width: 760px; padding: 0 16px; }
+.ending-text { margin-top: 30px; padding: 18px 22px; font-size: 24px; line-height: 1.25; text-align: left; }

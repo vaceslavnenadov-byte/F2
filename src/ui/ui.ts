@@ -89,6 +89,9 @@ export class UI {
     ($('btn-aim') as HTMLButtonElement).disabled = !playerTurn;
     $('btn-aim').classList.toggle('on', g.aimMode);
     $('clock').textContent = g.clockText();
+    const cd = $('countdown');
+    cd.classList.toggle('hidden', g.countdown === null);
+    if (g.countdown !== null) cd.textContent = `ДО ВЗРЫВА ${Math.max(0, Math.ceil(g.countdown))} с`;
     const ti = $('turn-indicator');
     ti.className = inCombat ? (playerTurn ? 'player' : 'enemy') : '';
     ti.textContent = playerTurn ? 'ВАШ ХОД' : 'ХОД ПРОТИВНИКА';
@@ -525,6 +528,32 @@ export class UI {
       });
     };
     c.tags = new Set<SkillId>(['melee', 'speech', 'unarmed']);
+    render();
+  }
+
+  /** Финальные слайды: текст по одному, в конце — выбор «продолжить» или «в меню». */
+  showEnding(slides: string[], onContinue: () => void) {
+    let i = 0;
+    const render = () => {
+      const last = i === slides.length - 1;
+      const s = this.screen(`
+        <div class="menu ending">
+          <div class="logo" style="font-size:clamp(32px,6vw,64px)">${last ? 'КОНЕЦ' : 'ЭПИЛОГ'}<small>${i + 1} / ${slides.length}</small></div>
+          <div class="crt ending-text">${esc(slides[i])}</div>
+          <div class="buttons">
+            ${last ? '<button id="e-continue">Продолжить свободную игру</button><button id="e-menu">В главное меню</button>' : '<button id="e-next">Далее</button>'}
+          </div>
+        </div>`, true);
+      s.querySelector('#e-next')?.addEventListener('click', () => {
+        i++;
+        render();
+      });
+      s.querySelector('#e-continue')?.addEventListener('click', () => {
+        this.hideScreen();
+        onContinue();
+      });
+      s.querySelector('#e-menu')?.addEventListener('click', () => location.reload());
+    };
     render();
   }
 

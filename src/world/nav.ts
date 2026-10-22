@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { heightAt } from './terrain';
+import { heightAt, terrainParams } from './terrain';
 import { WORLD_SIZE } from './config';
 
 export type Cell = [number, number];
@@ -75,7 +75,9 @@ export class NavGrid {
           maxDiff = Math.max(maxDiff, Math.abs(heightAt(p.x + dx, p.z + dz) - h));
         }
         const edge = Math.max(Math.abs(p.x), Math.abs(p.z));
-        if (maxDiff > 0.45 || edge > WORLD_SIZE / 2 - 6) this.blocked[this.idx(i, j)] = 1;
+        const water = terrainParams().water;
+        const flooded = water !== undefined && h < water + 0.3;
+        if (maxDiff > 0.45 || edge > WORLD_SIZE / 2 - 6 || flooded) this.blocked[this.idx(i, j)] = 1;
       }
     }
   }

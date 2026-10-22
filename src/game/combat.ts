@@ -38,6 +38,8 @@ export class Combat {
     this.participants = [
       p,
       ...game.party,
+      // Союзные неподвижные помощники (перепрограммированные турели).
+      ...game.actors.filter((a) => a.faction === 'companion' && !a.follow && !a.dead && a.speed === 0 && a.distanceTo(p) < 30),
       ...game.actors.filter((a) => a.faction === 'hostile' && !a.dead && a.distanceTo(p) < a.detectRadius + 3),
     ];
     if (target && !this.participants.includes(target)) this.participants.push(target);
@@ -322,6 +324,8 @@ export class Combat {
         if (path) await this.moveSteps(a, path.slice(0, a.ap));
         break;
       }
+      // Неподвижные (турели) только стреляют.
+      if (a.speed === 0) break;
       const path = this.approachPath(a, t, w.range);
       if (!path || path.length === 0) break;
       const steps = path.slice(0, a.ap);

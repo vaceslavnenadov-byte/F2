@@ -1,5 +1,5 @@
 import { Actor, type ActorDef } from '../entities/actor';
-import { HumanoidRig, LizardRig, QuadrupedRig, type HumanoidLook, type WeaponVisual } from '../entities/rigs';
+import { HumanoidRig, LizardRig, QuadrupedRig, TurretRig, type HumanoidLook, type WeaponVisual } from '../entities/rigs';
 import type { WeaponStats } from './items';
 
 export const ATTACKS: Record<string, WeaponStats> = {
@@ -113,9 +113,44 @@ export function deathclaw(id: string, name: string, def: Partial<ActorDef> = {})
   });
 }
 
-export function enclaveSoldier(id: string): Actor {
+export const PLASMA: WeaponStats = { skill: 'smallGuns', dmg: [12, 26], ap: 5, range: 22, melee: false, visual: 'rifle' };
+
+/** Солдат Анклава в силовой броне с плазменной винтовкой. */
+export function enclaveSoldier(id: string, def: Partial<ActorDef> = {}): Actor {
   return human(id, 'Солдат Анклава', { skin: '#33363a', cloth: '#26282b', hair: '#33363a', build: 1.25, scale: 1.08, armor: 'power' }, 'rifle', {
-    hp: 120, ap: 9, ac: 30, skill: 90, attack: ATTACKS.pistol, dt: 8, dr: 0.5, speed: 3,
+    hp: 75, ap: 8, ac: 22, skill: 70, attack: PLASMA, dt: 6, dr: 0.35, speed: 3, xp: 400, sequence: 8,
+    loot: [['microcell', 2, 8], ['stimpak', 0, 1], ['plasmaRifle', 0, 1]], ...def,
+  });
+}
+
+/** Полковник Стракс — командир платформы в улучшенной силовой броне. */
+export function colonel(): Actor {
+  const a = enclaveSoldier('colonel', {
+    hp: 200, ap: 10, ac: 28, skill: 82, dt: 6, dr: 0.4, xp: 2000, sequence: 12,
+    attack: { skill: 'smallGuns', dmg: [18, 34], ap: 5, range: 24, melee: false, visual: 'rifle' },
+    loot: [['microcell', 10, 20]],
+  });
+  a.name = 'Полковник Стракс';
+  a.rig.root.scale.setScalar(1.2);
+  return a;
+}
+
+/** Супермутант: огромный зеленоватый громила с кувалдой. */
+export function superMutant(id: string, tag?: string): Actor {
+  return human(id, 'Супермутант', { skin: '#74845a', cloth: '#3a3226', hair: '#74845a', build: 1.75, scale: 1.35 }, 'sledge', {
+    faction: 'hostile', hp: 75, ap: 8, ac: 12, skill: 65, xp: 320, sequence: 6, speed: 3.4, tag,
+    attack: { skill: 'melee', dmg: [8, 20], ap: 5, range: 1.8, melee: true, visual: 'sledge' },
+    dt: 3, dr: 0.2, wanderRadius: 4, detectRadius: 11, loot: [['caps', 10, 60], ['ammo5', 0, 12], ['stimpak', 0, 1]],
+  });
+}
+
+/** Автоматическая турель: не двигается, стреляет очередями. */
+export function turret(id: string, hostile: boolean): Actor {
+  return new Actor({
+    id, name: 'Турель', faction: hostile ? 'hostile' : 'companion', rig: new TurretRig(),
+    hp: 60, ap: 8, ac: 20, skill: 70, speed: 0, sequence: 9, dt: 6, dr: 0.4, xp: 150,
+    attack: { skill: 'smallGuns', dmg: [8, 16], ap: 4, range: 18, melee: false, visual: 'gun' },
+    detectRadius: hostile ? 12 : 0,
   });
 }
 

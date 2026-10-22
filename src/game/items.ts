@@ -109,6 +109,20 @@ export const ITEMS: Record<string, ItemDef> = {
     weapon: { skill: 'smallGuns', dmg: [12, 26], ap: 6, range: 26, melee: false, ammo: 'ammo5', visual: 'rifle' },
   },
   ammo5: { id: 'ammo5', name: 'Патроны 5 мм', kind: 'ammo', value: 3, desc: 'Мелкокалиберные патроны для автоматического оружия.' },
+  plasmaRifle: {
+    id: 'plasmaRifle', name: 'Плазменная винтовка', kind: 'weapon', value: 2200,
+    desc: 'Оружие Анклава. Сгусток плазмы прожигает почти любую броню.',
+    weapon: { skill: 'smallGuns', dmg: [16, 32], ap: 5, range: 22, melee: false, ammo: 'microcell', visual: 'rifle' },
+  },
+  microcell: { id: 'microcell', name: 'Микроядерная батарея', kind: 'ammo', value: 8, desc: 'Источник питания для энергетического оружия.' },
+  powerArmor: {
+    id: 'powerArmor', name: 'Силовая броня', kind: 'armor', value: 5000,
+    desc: 'Экзоскелет Анклава с собственным реактором. Внутри неё ты почти неуязвим.',
+    armor: { ac: 25, dt: 10, dr: 0.5, look: 'power' },
+  },
+  fakePapers: { id: 'fakePapers', name: 'Поддельные документы', kind: 'misc', value: 450, desc: 'Направление новобранца на базу Наварро. Печать почти настоящая.' },
+  keycard: { id: 'keycard', name: 'Ключ-карта Анклава', kind: 'misc', value: 0, desc: 'Карта доступа офицера платформы.' },
+  fobCode: { id: 'fobCode', name: 'Код опознавания', kind: 'misc', value: 0, desc: 'Код «свой-чужой» для подхода к платформе Анклава.' },
   regulator: { id: 'regulator', name: 'Регулятор потока', kind: 'misc', value: 0, desc: 'Тяжёлая деталь реактора, обмотанная изолентой. Нужна в Гекко.' },
   v13coords: { id: 'v13coords', name: 'Голодиск Убежища 8', kind: 'misc', value: 0, desc: 'Голодиск с координатами довоенных убежищ, включая Убежище 13.' },
   geck: { id: 'geck', name: 'ГЭКК', kind: 'misc', value: 0, desc: 'Генератор Эдемского Комплекса Колонизации. Чемодан, способный превратить пустошь в сад.' },
@@ -128,6 +142,7 @@ export const TRADERS: Record<string, { name: string; stock: [string, number][] }
   },
   vcdoctor: { name: 'Доктор Андерс', stock: [['caps', 400], ['stimpak', 8], ['radaway', 6], ['radx', 6]] },
   gecko: { name: 'Лорин', stock: [['caps', 250], ['radaway', 4], ['radx', 5], ['ammo10', 20], ['ammo5', 20], ['powder', 2]] },
+  rico: { name: 'Контрабандист Рико', stock: [['caps', 700], ['fakePapers', 1], ['ammo5', 60], ['microcell', 12], ['stimpak', 6], ['radaway', 2], ['leatherArmor', 1]] },
   becky: {
     name: 'Бекки',
     stock: [['caps', 600], ['ammo10', 50], ['ammo223', 30], ['pistol10', 1], ['huntingRifle', 1], ['leatherArmor', 1], ['metalArmor', 1], ['stimpak', 4], ['powder', 2], ['knife', 1]],

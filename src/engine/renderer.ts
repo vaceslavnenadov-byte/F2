@@ -46,11 +46,12 @@ export class Renderer {
   private composer: EffectComposer;
   private grade: ShaderPass;
   private bloom: UnrealBloomPass;
-  private sky: Sky;
+  readonly sky: Sky;
   private hemi: THREE.HemisphereLight;
   private stars: THREE.Points;
   /** Направление на светило, отбрасывающее тени (солнце днём, луна ночью). */
   private lightDir = new THREE.Vector3();
+  private horizon = new THREE.Color();
   /** 0 — день, 1 — глубокая ночь. */
   night = 0;
 
@@ -165,6 +166,7 @@ export class Renderer {
     const fog = this.scene.fog as THREE.FogExp2;
     fog.color.set(0x07080a);
     fog.density = 0.02;
+    this.scene.background = fog.color;
     (this.stars.material as THREE.PointsMaterial).opacity = 0;
     this.renderer.toneMappingExposure = 1.05;
     this.grade.uniforms.uNight.value = 0.35;
@@ -202,6 +204,9 @@ export class Renderer {
     const fog = this.scene.fog as THREE.FogExp2;
     fog.color.set(0x121828).lerp(new THREE.Color(0xc9a27e), day).lerp(new THREE.Color(0xc4704e), warm * day * 0.6);
     fog.density = 0.0065 + 0.004 * this.night;
+    // Фон — цвет неба у горизонта: его видно в отражениях воды вместо пересвеченного Sky.
+    this.horizon.set(0x101828).lerp(new THREE.Color(0x7d9cb8), day).lerp(fog.color, 0.35 + warm * 0.3);
+    this.scene.background = this.horizon;
     (this.stars.material as THREE.PointsMaterial).opacity = THREE.MathUtils.smoothstep(this.night, 0.5, 1);
     this.renderer.toneMappingExposure = 0.85 + 0.55 * this.night;
     this.grade.uniforms.uNight.value = this.night;

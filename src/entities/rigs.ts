@@ -798,3 +798,45 @@ export class QuadrupedRig extends Rig {
     if (this.wag > 0 && !this.isDead) this.tailBone.rotateY(Math.sin(this.time * (6 + this.wag * 10)) * this.wag * 0.6);
   }
 }
+
+// ─── Турель ─────────────────────────────────────────────────────────────────
+
+let TURRET_CLIPS: THREE.AnimationClip[] | null = null;
+
+/** Автоматическая турель: неподвижное основание и поворотная голова со стволами. */
+export class TurretRig extends Rig {
+  readonly height = 1.6;
+
+  constructor() {
+    super();
+    const steel = std('#3a3e42', 0.4, 0.8);
+    const base = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.7, 1, 16), steel);
+    base.position.y = 0.5;
+    this.root.add(base);
+    const head = new THREE.Group();
+    head.name = 'turretHead';
+    head.position.y = 1.2;
+    const dome = new THREE.Mesh(new THREE.SphereGeometry(0.45, 16, 12), steel);
+    dome.scale.set(1, 0.7, 1.1);
+    head.add(dome);
+    for (const sx of [-1, 1]) {
+      const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.07, 0.9, 8), std('#1e1e20', 0.3, 0.9));
+      barrel.rotation.x = Math.PI / 2;
+      barrel.position.set(sx * 0.15, 0, 0.6);
+      head.add(barrel);
+    }
+    const eye = new THREE.Mesh(new THREE.SphereGeometry(0.07, 8, 6), new THREE.MeshStandardMaterial({ color: '#f00', emissive: '#ff2010', emissiveIntensity: 2.5 }));
+    eye.position.set(0, 0.15, 0.42);
+    head.add(eye);
+    this.root.add(head);
+    this.root.traverse((o) => ((o as THREE.Mesh).isMesh ? (o.castShadow = true) : null));
+    TURRET_CLIPS ??= [
+      makeClip('idle', 4, { turretHead: [[0, 0, 0, 0], [1, 0, 0.5, 0], [3, 0, -0.5, 0], [4, 0, 0, 0]] }),
+      makeClip('walk', 1, { turretHead: [[0, 0, 0, 0], [1, 0, 0, 0]] }),
+      makeClip('attack', 0.4, { turretHead: [[0, 0, 0, 0], [0.05, -0.15, 0, 0], [0.4, 0, 0, 0]] }),
+      makeClip('hit', 0.3, { turretHead: [[0, 0, 0, 0], [0.1, 0.1, 0.2, 0], [0.3, 0, 0, 0]] }),
+      makeClip('death', 0.8, { turretHead: [[0, 0, 0, 0], [0.8, 0.9, 0.3, 0.4]] }),
+    ];
+    this.setupAnimations(this.root, TURRET_CLIPS);
+  }
+}

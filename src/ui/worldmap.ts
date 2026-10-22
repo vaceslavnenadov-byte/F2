@@ -1,5 +1,5 @@
 import { fbm } from '../core/noise';
-import { WORLD_MAP, DAYS_PER_UNIT } from '../world/locations';
+import { WORLD_MAP, DAYS_PER_UNIT, coastX } from '../world/locations';
 
 export interface WorldMapOpts {
   pos: { x: number; y: number };
@@ -48,6 +48,19 @@ function drawBackground(): HTMLCanvasElement {
         r -= 30;
         g -= 20;
         b -= 5;
+      }
+      // Океан на западе: глубина темнеет от берега.
+      const ux = (x / W) * 100 + (fbm(x * 0.02, y * 0.02, 3, 903) - 0.5) * 3;
+      const coast = coastX((y / H) * 66);
+      if (ux < coast) {
+        const depth = Math.min(1, (coast - ux) / 8);
+        r = 70 - depth * 30 + n * 20;
+        g = 92 - depth * 30 + n * 20;
+        b = 96 - depth * 20 + n * 25;
+      } else if (ux < coast + 0.7) {
+        r = 190;
+        g = 168;
+        b = 120;
       }
       // Тёмные края, как на старой карте.
       const vx = x / W - 0.5;

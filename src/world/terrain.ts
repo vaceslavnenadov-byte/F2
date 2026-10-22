@@ -20,6 +20,21 @@ export interface TerrainParams {
   /** Площадки с иной почвой (асфальт, утоптанная земля). */
   groundZones?: (Circle & { color: string; strength: number })[];
   palette: { sand: string; sandDark: string; rock: string; rockLight: string; dirt: string };
+  /** Сдвиг всего рельефа (морское дно платформы — ниже нуля). */
+  base?: number;
+  /** Морское побережье: западнее x рельеф уходит под воду. */
+  coast?: { x: number; depth: number; width: number };
+  /** Плоские прямоугольные площадки точной высоты (палубы, причалы). */
+  platforms?: Platform[];
+  /** Уровень моря; ниже него клетки непроходимы. */
+  water?: number;
+}
+
+export interface Platform { x: number; z: number; hw: number; hd: number; h: number }
+
+export function onPlatform(x: number, z: number): Platform | null {
+  for (const p of P.platforms ?? []) if (Math.abs(x - p.x) <= p.hw && Math.abs(z - p.z) <= p.hd) return p;
+  return null;
 }
 
 export const DESERT_PALETTE = { sand: '#d2a878', sandDark: '#b08460', rock: '#8a5a40', rockLight: '#b07a56', dirt: '#8d6a4c' };
@@ -31,7 +46,7 @@ export function setTerrain(p: TerrainParams) { P = p; }
 export function terrainParams() { return P; }
 
 /** Высота рельефа в точке мира. Единственный источник истины для земли, навигации и размещения объектов. */
-export function heightAt(x: number, z: number): number {
+export function heightAt(x: number, z: number, ignorePlatforms = false): number {
   const s = P.seed;
   let h = (fbm(x * 0.018, z * 0.018, 5, 1 + s) - 0.5) * P.hills;
   h += (fbm(x * 0.09, z * 0.09, 3, 7 + s) - 0.5) * 1.2;
@@ -53,10 +68,16 @@ export function heightAt(x: number, z: number): number {
     }
   }
 
-  // Горное обрамление карты.
+  // Горное обрамление карты (кроме морской стороны).
+  const sea = P.coast ? smoothstep(P.coast.x + P.coast.width, P.coast.x - P.coast.width, x + (fbm(z * 0.04, 3, 2, 60 + s) - 0.5) * 14) : 0;
   const edge = Math.max(Math.abs(x), Math.abs(z));
-  const mountain = smoothstep(HALF - 22, HALF - 2, edge);
+  const mountain = smoothstep(HALF - 22, HALF - 2, edge) * (1 - sea);
   h += mountain * (10 + fbm(x * 0.05, z * 0.05, 4, 50 + s) * 22);
+  if (P.coast) h -= sea * P.coast.depth;
+  h += P.base ?? 0;
+  // Палубы и пирсы — для ходьбы; рисуемая земля под ними остаётся дном.
+  const plat = P.platforms && !ignorePlatforms ? onPlatform(x, z) : null;
+  if (plat) return plat.h;
   return h;
 }
 
@@ -78,7 +99,7 @@ export function buildTerrain(tex: DetailTextures): THREE.Mesh {
   const geo = new THREE.PlaneGeometry(WORLD_SIZE, WORLD_SIZE, seg, seg);
   geo.rotateX(-Math.PI / 2);
   const pos = geo.attributes.position as THREE.BufferAttribute;
-  for (let i = 0; i < pos.count; i++) pos.setY(i, heightAt(pos.getX(i), pos.getZ(i)));
+  for (let i = 0; i < pos.count; i++) pos.setY(i, heightAt(pos.getX(i), pos.getZ(i), true));
   geo.computeVertexNormals();
 
   const nrm = geo.attributes.normal as THREE.BufferAttribute;
@@ -102,6 +123,7 @@ export function buildTerrain(tex: DetailTextures): THREE.Mesh {
       const k = smoothstep(zc.r, zc.r * 0.6, Math.hypot(x - zc.x, z - zc.z)) * zc.strength;
       if (k > 0) c.lerp(zc.c, k * (0.75 + 0.25 * fbm(x * 0.3, z * 0.3, 2, 4)));
     }
+    if (P.water !== undefined && y < P.water + 0.6) c.lerp(new THREE.Color('#5e5040'), smoothstep(P.water + 0.6, P.water - 1.5, y));
     const pd = distToPaths(x, z);
     if (pd < 3) c.lerp(dirt, smoothstep(3, 1, pd) * (0.55 + 0.25 * fbm(x * 0.4, z * 0.4, 2, 5)));
     const rockT = smoothstep(0.18, 0.42, slope);

@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { Water } from 'three/examples/jsm/objects/Water.js';
 import { fbm } from '../core/noise';
 import { mulberry32 } from '../core/math';
 import { ParticleSystem } from '../engine/particles';
@@ -83,6 +84,8 @@ export class World {
   private readonly flames: { pos: THREE.Vector3; light: THREE.PointLight | null; base: number; scale: number }[] = [];
   private readonly exitMats: THREE.ShaderMaterial[] = [];
   private readonly steams: THREE.Vector3[] = [];
+  /** Океан с отражениями (если у локации есть уровень моря). */
+  water: Water | null = null;
   private fireAcc = 0;
 
   constructor(readonly loc: LocationDef, flags: Set<string> = new Set()) {
@@ -127,6 +130,7 @@ export class World {
       glow: new THREE.MeshStandardMaterial({ color: '#ffcf8a', emissive: '#ffa040', emissiveIntensity: 1.5 }),
     };
 
+    if (loc.terrain.water !== undefined) this.buildOcean(loc.terrain.water);
     loc.build(this, flags);
     this.buildExits(loc.exits);
     const reserved = [...loc.scatter.reserved, ...loc.exits.map((e) => ({ ...e, r: e.r + 3 }))];
@@ -479,6 +483,24 @@ export class World {
     this.group.add(g);
   }
 
+  private buildOcean(level: number) {
+    const normals = this.tex.rockNormal.clone();
+    normals.wrapS = normals.wrapT = THREE.RepeatWrapping;
+    this.water = new Water(new THREE.PlaneGeometry(1200, 1200), {
+      textureWidth: 512,
+      textureHeight: 512,
+      waterNormals: normals,
+      sunDirection: new THREE.Vector3(0.5, 0.6, 0.3).normalize(),
+      sunColor: 0xffe6c0,
+      waterColor: 0x0c2a34,
+      distortionScale: 2.2,
+      fog: true,
+    });
+    this.water.rotation.x = -Math.PI / 2;
+    this.water.position.y = level;
+    this.group.add(this.water);
+  }
+
   /** Столб пара (градирни, трубы). */
   addSteam(pos: THREE.Vector3) { this.steams.push(pos); }
 
@@ -652,8 +674,13 @@ export class World {
 
   // ─── Анимация мира ────────────────────────────────────────────────────────
 
-  update(dt: number, time: number, focus: THREE.Vector3) {
+  update(dt: number, time: number, focus: THREE.Vector3, sunDir?: THREE.Vector3) {
     this.timeUniform.value = time;
+    if (this.water) {
+      const u = this.water.material.uniforms;
+      u.time.value += dt * 0.6;
+      if (sunDir) u.sunDirection.value.copy(sunDir).normalize();
+    }
     for (const m of this.exitMats) m.uniforms.uTime.value = time;
     this.fireAcc += dt;
     const c = new THREE.Color();

@@ -382,7 +382,7 @@ export const CH2_DIALOGUES: Record<string, DialogueDef> = {
         options: [{ text: 'Куда их увезли?', next: 'where' }],
       },
       where: {
-        text: 'На запад… к морю… Я видел во сне платформу посреди воды, в огнях. Найди их, Избранный. Верни наш народ. ГЭКК… сохрани. Он ещё понадобится.',
+        text: 'На запад… к морю… Я видел во сне платформу посреди воды, в огнях. В порту Сан-Франциско есть люди с кораблями. Найди их, Избранный. Верни наш народ. ГЭКК… сохрани. Он ещё понадобится.',
         options: [
           {
             text: 'Я найду их. Клянусь.',
@@ -390,6 +390,7 @@ export const CH2_DIALOGUES: Record<string, DialogueDef> = {
               g.advanceQuest('geck', 9);
               g.quests.geck.state = 'rewarded';
               g.startQuest('enclave');
+              g.discover('sanfran');
               g.addXp(500);
               g.ui.banner('КОНЕЦ ГЛАВЫ II', 4);
             },

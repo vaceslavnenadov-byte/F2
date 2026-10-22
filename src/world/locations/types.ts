@@ -17,4 +17,8 @@ export interface LocationDef {
   radZones?: (Circle & { rate: number })[];
   build(w: World, flags: Set<string>): void;
   spawn(g: Game): void;
+  /** Логика локации каждый кадр вне боя (тревога, триггеры). */
+  update?(g: Game, dt: number): void;
+  /** Свой обработчик выхода; true — карта мира не открывается. */
+  onExit?(g: Game): boolean;
 }

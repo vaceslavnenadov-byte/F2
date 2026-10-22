@@ -1,6 +1,7 @@
 import type { Game } from './game';
 import { CAGE } from '../world/locations/den';
 import { CH2_DIALOGUES } from './dialogues_ch2';
+import { CH3_DIALOGUES } from './dialogues_ch3';
 
 type Text = string | ((g: Game) => string);
 
@@ -528,6 +529,7 @@ export const DIALOGUES: Record<string, DialogueDef> = {
   },
 
   ...CH2_DIALOGUES,
+  ...CH3_DIALOGUES,
 
   villager: {
     start: () => 'talk',

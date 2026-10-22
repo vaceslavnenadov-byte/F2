@@ -131,6 +131,8 @@ export class Actor {
   /** Движение по точкам; промис завершается по прибытии или при остановке. */
   moveAlong(points: THREE.Vector3[]): Promise<void> {
     this.stop();
+    // Неподвижные (турели) никуда не идут.
+    if (this.speed <= 0) return Promise.resolve();
     this.path = points.map((p) => p.clone());
     return new Promise((resolve) => {
       if (this.path.length === 0) resolve();
