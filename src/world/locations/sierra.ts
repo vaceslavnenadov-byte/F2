@@ -10,7 +10,7 @@ const EXIT = { x: 0, z: 56, r: 4 };
 export const ARMORY = { x: 0, z: -30 };
 export const SIERRA_GUARDS = ['srobot0', 'srobot1', 'srobot2', 'srobot3', 'sturret0', 'sturret1'];
 
-function bunker(w: World, x: number, z: number, wd: number, d: number, h: number, rot: number, label: string): THREE.Group {
+export function bunker(w: World, x: number, z: number, wd: number, d: number, h: number, rot: number, label: string): THREE.Group {
   const g = new THREE.Group();
   const body = new THREE.Mesh(jitter(new THREE.BoxGeometry(wd, h, d, 4, 2, 4), 0.05, 1, Math.floor(x * 3 + z)), w.mat.concrete);
   body.position.y = h / 2;

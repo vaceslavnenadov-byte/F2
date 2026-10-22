@@ -22,6 +22,7 @@ import { dog as makeDog, sulik as makeSulik, cassidy as makeCassidy, marcus as m
 import { OIL_RIG, RIG_DOCK, RIG_SOLDIERS } from '../world/locations/oilrig';
 import { highwayman } from '../world/props';
 import { SIERRA_GUARDS } from '../world/locations/sierra';
+import { KHAN_IDS } from '../world/locations/vault15';
 import { HATCH, SLAG_IDS, spawnKarl, spawnSlags } from '../world/locations/modoc';
 import { NAVARRO_SOLDIERS } from '../world/locations/navarro';
 import { MORELLI_IDS, CARVER_IDS } from '../world/locations/newreno';
@@ -1005,6 +1006,10 @@ export class Game {
       const n = randInt(min, max);
       if (n > 0) this.giveItem(id, n);
     }
+    if (target.id === 'darion') {
+      this.advanceQuest('vault15', 1);
+      this.ui.banner('ДАРИОН МЁРТВ', 2.5);
+    }
     if (target.id === 'wanaQueen') {
       this.advanceQuest('wanamingo', 1);
       this.ui.banner('КОРОЛЕВА МЕРТВА', 2.5);
@@ -1486,6 +1491,9 @@ export class Game {
       : 'В войне семей Луиджи Морелли пал. Карвер правил Нью-Рино железной рукой и помнил, кому обязан короной.');
     else if (f.has('sidedMorelli')) slides.push('Без бухгалтерии Карвер быстро пал. Нью-Рино стал вотчиной семьи Морелли — и ещё на шаг ближе к тому, чтобы стать столицей пороков всей пустоши.');
     else if (f.has('sidedCarver')) slides.push('Семья Карвер вернула свои книги и вытеснила Морелли. Новый порядок в Нью-Рино оказался ничуть не лучше старого.');
+    if (f.has('v15Squatters')) slides.push('Сквоттеры обжили Убежище 15 и вычистили его до блеска. Через десять лет там вырос городок, а на стене атриума висит твой портрет рядом с портретом Танди.');
+    else if (f.has('v15NCR')) slides.push('Убежище 15 стало госпиталем и складом Республики. НКР росла — и дороги севера стали безопаснее.');
+    if (f.has('ncrRanger')) slides.push('Рейнджеры Пустоши ещё долго рассказывали новобранцам о рейнджере из Арройо, который не отступал перед злом.');
     if (this.quests.wanamingo?.state === 'rewarded') slides.push('Шахта Кокавиф снова давала золото. Реддинг разбогател, и на главной улице поставили памятник тому, кто спустился к королеве ванаминго.');
     if (f.has('modocPeace')) slides.push('Модок и слаги стали одним городом: днём — поля, ночью — кузни под землёй. На свадьбе Карла и Ребекки гуляли обе стороны.');
     else if (f.has('karlHome')) slides.push('Ферма призраков опустела навсегда. Карл так и не простил спасителя и однажды ушёл в пустошь один.');
@@ -1562,6 +1570,21 @@ export class Game {
       if (this.quests.boxing) this.quests.boxing.state = 'rewarded';
       this.ui.banner('ЧЕМПИОН НЬЮ-РИНО', 2.5);
     }
+  }
+
+  /** Ханы нападают. */
+  khansWar() {
+    this.turnHostile(KHAN_IDS, 'khansHostile');
+  }
+
+  /** Ханы уходят от Убежища 15 без боя. */
+  khansLeave() {
+    this.flags.add('khansLeft');
+    this.closeDialogue();
+    for (const id of KHAN_IDS) this.removeFromLocation(id);
+    this.advanceQuest('vault15', 1);
+    this.addXp(600);
+    this.ui.log('Ханы сворачивают палатки и уходят на юг. Вернись к Танди.', 'good');
   }
 
   /** Выход из шахты Кокавиф — обратно в Реддинг, к копру. */

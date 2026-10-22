@@ -13,6 +13,8 @@ import { SIERRA } from './sierra';
 import { MODOC } from './modoc';
 import { REDDING } from './redding';
 import { KOKOWEEF } from './kokoweef';
+import { NCR } from './ncr';
+import { VAULT15 } from './vault15';
 import type { LocationDef } from './types';
 
 export const LOCATIONS: Record<string, LocationDef> = {
@@ -31,6 +33,8 @@ export const LOCATIONS: Record<string, LocationDef> = {
   modoc: MODOC,
   redding: REDDING,
   kokoweef: KOKOWEEF,
+  ncr: NCR,
+  vault15: VAULT15,
 };
 
 /** Положение городов на карте мира (условные единицы 0..100). */
@@ -47,6 +51,8 @@ export const WORLD_MAP: Record<string, { x: number; y: number; label: string; de
   brokenhills: { x: 73, y: 46, label: 'Брокен-Хиллз', desc: 'Урановый рудник, где люди, гули и мутанты живут вместе.' },
   sierra: { x: 52, y: 18, label: 'Склад Сьерра', desc: 'Довоенный армейский склад в горах. Охраняется роботами.' },
   redding: { x: 27, y: 37, label: 'Реддинг', desc: 'Шахтёрский город, живущий золотом.' },
+  ncr: { x: 78, y: 72, label: 'НКР', desc: 'Новая Калифорнийская Республика — самое большое государство пустоши.' },
+  vault15: { x: 88, y: 60, label: 'Убежище 15', desc: 'Полуразрушенное убежище. Здесь живут сквоттеры и бесчинствуют ханы.' },
   modoc: { x: 47, y: 29, label: 'Модок', desc: 'Фермерский городок: брамины, кожи и ферма с призраками.' },
 };
 
