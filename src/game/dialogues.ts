@@ -1,5 +1,5 @@
 import type { Game } from './game';
-import { GECKO_GOAL } from './quests';
+import { CAGE } from '../world/locations/den';
 
 type Text = string | ((g: Game) => string);
 
@@ -29,6 +29,7 @@ function rewardGeckos(g: Game, bonus: boolean) {
   g.quests.geckos.state = 'rewarded';
   g.giveItem('zipgun', 1);
   g.giveItem('ammo10', 12);
+  g.giveItem('caps', 50);
   g.addXp(400);
   if (bonus) {
     g.giveItem('powder', 3);
@@ -88,7 +89,7 @@ export const DIALOGUES: Record<string, DialogueDef> = {
         options: [{ text: 'Угу!', next: null }],
       },
       progress: {
-        text: (g) => `Гекконы всё ещё живы — охотники каждое утро находят свежие следы. (Убито: ${g.quests.geckos.progress}/${GECKO_GOAL})`,
+        text: (g) => `Гекконы всё ещё живы — охотники каждое утро находят свежие следы. (Убито: ${g.quests.geckos.progress}/5)`,
         options: [
           { text: 'Где именно гнездо?', cond: smart, next: 'where' },
           { text: 'Уже иду.', next: null },
@@ -122,13 +123,36 @@ export const DIALOGUES: Record<string, DialogueDef> = {
       after: {
         text: 'Ты — гордость Арройо. Но когда придёт время, тебе предстоит путь куда длиннее этого каньона.',
         options: [
-          { text: 'Какой путь?', cond: smart, next: 'path' },
+          { text: 'Я готов к долгому пути. Что нужно делать?', cond: (g) => !g.quests.geck, next: 'geck' },
+          { text: 'Какой путь?', cond: (g) => smart(g) && !g.quests.geck, next: 'path' },
+          { text: 'Я ищу Вика. Есть советы?', cond: (g) => g.quests.geck?.state === 'active', next: 'geckHint' },
           { text: 'До встречи.', next: null },
         ],
       },
       path: {
-        text: 'Засуха убивает нас. Однажды тебе придётся покинуть долину и отыскать ГЭКК. Но не сегодня. Сегодня отдохни у костра.',
-        options: [{ text: 'Я буду готов.', next: null }],
+        text: 'Засуха убивает нас. Однажды тебе придётся покинуть долину и отыскать ГЭКК. Может, это время уже пришло.',
+        options: [{ text: 'Расскажи, с чего начать.', next: 'geck' }, { text: 'Я буду готов.', next: null }],
+      },
+      geck: {
+        text: 'Деревне нужен ГЭКК — чудо, что творит сады из праха. Начни с торговца по имени Вик: он бывал у нас и рассказывал о Выходцах из Убежищ. ' +
+          'Последний раз его видели в Кламате, к юго-востоку отсюда. Иди по южной тропе — она выведет в пустошь.',
+        options: [
+          {
+            text: 'Я найду Вика.',
+            action: (g) => {
+              g.startQuest('geck');
+              g.discover('klamath');
+            },
+            next: null,
+          },
+        ],
+      },
+      geckHint: {
+        text: (g) =>
+          g.quests.geck.progress === 0
+            ? 'Спроси о Вике в Кламате. Там всегда кто-то торгует, кто-то пьёт — кто-нибудь да знает.'
+            : 'Дэн — дурное место, дитя. Держи копьё наготове и не верь тамошним людям.',
+        options: [{ text: 'Спасибо.', next: null }],
       },
     },
   },
@@ -217,6 +241,270 @@ export const DIALOGUES: Record<string, DialogueDef> = {
     },
   },
 
+  // ─── Кламат ───────────────────────────────────────────────────────────────
+  maida: {
+    start: (g) => (g.quests.rats?.state === 'done' ? 'ratsDone' : 'hello'),
+    nodes: {
+      hello: {
+        text: 'Добро пожаловать в Кламат, путник. Я Мэйда Бакнер — держу салун и лавку. Выпивка, патроны, слухи — всё за крышки.',
+        options: [
+          {
+            text: 'Я ищу торговца по имени Вик.',
+            cond: (g) => g.quests.geck?.state === 'active' && g.quests.geck.progress === 0,
+            action: (g) => {
+              g.advanceQuest('geck', 1);
+              g.discover('den');
+            },
+            next: 'vic',
+          },
+          { text: 'Что за город Кламат?', next: 'town' },
+          { text: 'Нет ли работы?', cond: (g) => !g.quests.rats, next: 'job' },
+          { text: 'Насчёт крыс…', cond: (g) => g.quests.rats?.state === 'active', next: 'ratsWait' },
+          { text: 'Что за парень сидит у крыльца?', cond: (g) => !g.flags.has('sulikJoined'), next: 'sulikInfo' },
+          { text: 'Пока.', next: null },
+        ],
+      },
+      vic: {
+        text: 'Вик? Старый лис уехал в Дэн месяц назад — хотел сбыть хабар. Говорят, проигрался и теперь сидит в клетке у Мецгера, главного работорговца. ' +
+          'Дэн — к югу отсюда. Держи ухо востро: там за крышку горло перережут.',
+        options: [{ text: 'Спасибо.', next: 'hello' }],
+      },
+      town: {
+        text: 'Трапперы, пастухи брамина да пара бродяг. Живём охотой на гекконов и торговлей шкурами. Мирно — если не считать крыс и бандитов на дорогах.',
+        options: [{ text: 'Понятно.', next: 'hello' }],
+      },
+      job: {
+        text: 'Есть. У склада на западной окраине завелись крысы — здоровые, как собаки. Перебьёшь — заплачу сотню крышек.',
+        options: [
+          { text: 'Берусь.', action: (g) => g.startQuest('rats'), next: null },
+          { text: 'Не сейчас.', next: 'hello' },
+        ],
+      },
+      ratsWait: {
+        text: 'Крысы всё ещё там? Склад на западе, не промахнёшься.',
+        options: [{ text: 'Уже иду.', next: null }],
+      },
+      ratsDone: {
+        text: 'Слышала, у склада тихо! Держи сотню, ты её заработал.',
+        options: [
+          {
+            text: 'Благодарю.',
+            action: (g) => {
+              g.quests.rats.state = 'rewarded';
+              g.giveItem('caps', 100);
+              g.addXp(200);
+            },
+            next: 'hello',
+          },
+        ],
+      },
+      sulikInfo: {
+        text: 'Сулик? Племенной, как и ты. Выпил у меня в долг на полсотни крышек и теперь отрабатывает. Заплатишь за него — мне меньше хлопот.',
+        options: [{ text: 'Ясно.', next: 'hello' }],
+      },
+    },
+  },
+
+  sulik: {
+    start: (g) => (g.flags.has('sulikJoined') ? 'party' : 'hello'),
+    nodes: {
+      hello: {
+        text: 'Сулик видит — ты с племени. Дедушка говорит: хороший знак. Сулик должен Мэйде, уйти не может.',
+        options: [
+          {
+            text: 'Я заплачу твой долг (50 крышек). Пойдёшь со мной?',
+            cond: (g) => g.inv.count('caps') >= 50,
+            action: (g) => {
+              g.takeItem('caps', 50);
+              g.recruitSulik();
+            },
+            next: 'joined',
+          },
+          {
+            text: 'Мэйда отпустит тебя — я с ней договорюсь.',
+            check: '[Красноречие 70]',
+            cond: (g) => g.char.skill('speech') >= 70,
+            action: (g) => g.recruitSulik(),
+            next: 'joined',
+          },
+          { text: 'Дедушка?', next: 'grandpa' },
+          { text: 'Удачи.', next: null },
+        ],
+      },
+      grandpa: {
+        text: 'Дух дедушки. Живёт в кости. *Сулик стучит по кости в носу.* Дедушка говорит много. Иногда — правду.',
+        options: [{ text: 'Понятно…', next: 'hello' }],
+      },
+      joined: {
+        text: 'Хорошо! Сулик идёт с тобой. Дубина Сулика — твоя дубина.',
+        options: [{ text: 'Идём.', next: null }],
+      },
+      party: {
+        text: 'Сулик здесь. Дедушка говорит — идти вперёд.',
+        options: [{ text: 'Идём.', next: null }],
+      },
+    },
+  },
+
+  torr: {
+    start: () => 'hello',
+    nodes: {
+      hello: {
+        text: 'Я Торр. Пасу брамина. Гекконы по ночам воют — брамин нервничает. А нервный брамин — плохое молоко.',
+        options: [
+          { text: 'Сколько стоит брамин?', next: 'price' },
+          { text: 'Удачи с брамином.', next: null },
+        ],
+      },
+      price: {
+        text: 'Не продаётся! Ну… для тебя — тоже не продаётся.',
+        options: [{ text: 'Ладно.', next: null }],
+      },
+    },
+  },
+
+  klamathFolk: {
+    start: () => 'talk',
+    nodes: {
+      talk: {
+        text: () => pick([
+          'Шкуры гекконов нынче в цене. Если добудешь — неси к Мэйде.',
+          'На дорогах снова бандиты. Без ствола из города лучше не выходить.',
+          'Слыхал, в Дэне торгуют людьми. Мерзкое место.',
+          'Сулик опять спорит со своим «дедушкой». Чудной парень.',
+          'Говорят, на юге есть город, где всё из довоенного бетона.',
+        ]),
+        options: [{ text: 'Бывай.', next: null }],
+      },
+    },
+  },
+
+  // ─── Дэн ──────────────────────────────────────────────────────────────────
+  metzger: {
+    start: (g) => (g.flags.has('vicFree') ? 'after' : 'hello'),
+    nodes: {
+      hello: {
+        text: 'Чего надо, племенной? Ищешь работу? Гильдии всегда нужны крепкие рабы. Шучу. Наверное.',
+        options: [
+          { text: 'Я пришёл за Виком.', next: 'vic' },
+          { text: 'Кто ты такой?', next: 'who' },
+          { text: 'Ничего.', next: null },
+        ],
+      },
+      who: {
+        text: 'Мецгер. Гильдия работорговцев. Всё, что движется в Дэне, движется с моего разрешения.',
+        options: [{ text: 'Ясно.', next: 'hello' }],
+      },
+      vic: {
+        text: (g) => (g.flags.has('metzgerDiscount') ? 'Договорились на полторы сотни. Крышки есть?' : 'Старик должен Гильдии. Хочешь его — 300 крышек. Или проваливай.'),
+        options: [
+          {
+            text: 'Вот 300 крышек.',
+            cond: (g) => !g.flags.has('metzgerDiscount') && g.inv.count('caps') >= 300,
+            action: (g) => {
+              g.takeItem('caps', 300);
+              freeVic(g);
+            },
+            next: 'paid',
+          },
+          {
+            text: 'Старик еле дышит. Сдохнет у тебя — ни крышки не получишь. Сто пятьдесят.',
+            check: '[Красноречие 60]',
+            cond: (g) => !g.flags.has('metzgerDiscount') && g.char.skill('speech') >= 60,
+            action: (g) => g.flags.add('metzgerDiscount'),
+            next: 'discount',
+          },
+          {
+            text: 'Вот 150 крышек.',
+            cond: (g) => g.flags.has('metzgerDiscount') && g.inv.count('caps') >= 150,
+            action: (g) => {
+              g.takeItem('caps', 150);
+              freeVic(g);
+            },
+            next: 'paid',
+          },
+          { text: 'Вернусь с крышками.', next: null },
+        ],
+      },
+      discount: {
+        text: 'Хех. Язык у тебя подвешен. Ладно — 150, и забирай своего старика.',
+        options: [{ text: 'Договорились.', next: 'vic' }],
+      },
+      paid: {
+        text: 'Приятно иметь дело. Эй, там! Выпустите старика!',
+        options: [{ text: '[Уйти]', next: null }],
+      },
+      after: {
+        text: 'Сделка закрыта. Проваливай, пока я не передумал.',
+        options: [{ text: '[Уйти]', next: null }],
+      },
+    },
+  },
+
+  slaver: {
+    start: () => 'talk',
+    nodes: {
+      talk: {
+        text: 'Не стой столбом. Есть дело — говори с Мецгером.',
+        options: [{ text: '[Уйти]', next: null }],
+      },
+    },
+  },
+
+  vic: {
+    start: (g) => (g.flags.has('vicFree') ? (g.flags.has('vicTalked') ? 'after' : 'free') : 'caged'),
+    nodes: {
+      caged: {
+        text: 'Эй, ты! Ты из Арройо? По одежде вижу. Вытащи меня отсюда — поговори с Мецгером. Я в долгу не останусь.',
+        options: [
+          { text: 'Старейшина послал меня за тобой.', next: 'caged2' },
+          { text: 'Посмотрим.', next: null },
+        ],
+      },
+      caged2: {
+        text: 'Значит, это из-за фляги… Сначала выпусти, потом поговорим. Мецгер хочет 300 крышек — но он жаден, а не глуп. Можно и поторговаться.',
+        options: [{ text: 'Жди.', next: null }],
+      },
+      free: {
+        text: 'Спасибо, дружище! Так Арройо ищет ГЭКК… Ту флягу с цифрой «13» я выменял давно. Но я знаю место, где помнят довоенные Убежища: ' +
+          'Убежище-Сити, на северо-востоке. Если кто и знает, где искать ГЭКК, — так это они.',
+        options: [
+          {
+            text: 'Спасибо, Вик. Встретимся в Убежище-Сити.',
+            action: (g) => {
+              g.flags.add('vicTalked');
+              g.advanceQuest('geck', 3);
+              g.quests.geck.state = 'rewarded';
+              g.addXp(500);
+              g.ui.banner('ПРОДОЛЖЕНИЕ СЛЕДУЕТ…', 3.5);
+            },
+            next: null,
+          },
+        ],
+      },
+      after: {
+        text: 'Береги себя в дороге. Я ещё немного побуду в Дэне, а потом — домой.',
+        options: [{ text: 'Удачи, Вик.', next: null }],
+      },
+    },
+  },
+
+  denFolk: {
+    start: () => 'talk',
+    nodes: {
+      talk: {
+        text: () => pick([
+          'Есть пара крышек? Нет? Тогда отвали.',
+          'Не ходи в южный переулок. Там ребята со стволами, и они не любят гостей.',
+          'Мецгер скупает всех, кто не может за себя постоять. Смотри в оба.',
+          'Бекки разливает лучшую бормотуху в Дэне. Ну, единственную.',
+          'Видел старика в клетке? Бедолага. Мецгер с него шкуру спустит.',
+        ]),
+        options: [{ text: '[Уйти]', next: null }],
+      },
+    },
+  },
+
   villager: {
     start: () => 'talk',
     nodes: {
@@ -237,6 +525,20 @@ export const DIALOGUES: Record<string, DialogueDef> = {
     },
   },
 };
+
+function pick(lines: string[]) {
+  return lines[Math.floor(Math.random() * lines.length)];
+}
+
+function freeVic(g: Game) {
+  g.flags.add('vicFree');
+  g.advanceQuest('geck', 2);
+  const vic = g.actors.find((a) => a.id === 'vic');
+  if (vic) {
+    vic.place(CAGE.x + 3, CAGE.z + 3);
+    vic.wanderRadius = 3;
+  }
+}
 
 export function resolveText(t: Text, g: Game): string {
   return typeof t === 'function' ? t(g) : t;

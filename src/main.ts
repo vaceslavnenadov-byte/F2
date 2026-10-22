@@ -1,5 +1,6 @@
 import './style.css';
 import { Game } from './game/game';
+import { LOCATIONS } from './world/locations';
 
 const game = new Game(document.getElementById('app')!);
 
@@ -17,3 +18,4 @@ if (Game.consumeLoadFlag() && game.loadFromStorage()) {
 
 // Доступ из консоли для отладки.
 (window as unknown as { game: Game }).game = game;
+(window as unknown as { LOCS: typeof LOCATIONS }).LOCS = LOCATIONS;

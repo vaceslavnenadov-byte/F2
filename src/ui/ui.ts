@@ -10,6 +10,12 @@ function esc(s: string) {
   return s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
 }
 
+const LOCATION_NOTES: Record<string, string> = {
+  arroyo: 'Храм Испытаний — к северу. Гнездо гекконов — к востоку. Нагор живёт у западной хижины. Южная тропа ведёт к выходу в пустошь.',
+  klamath: 'Салун Мэйды — на северной стороне улицы. Склад — на западной окраине, загон Торра — на востоке. Выход — по дороге на восток.',
+  den: 'Гильдия работорговцев — на севере. Клетка с пленником — рядом. В юго-восточном переулке опасно. Выход — на запад.',
+};
+
 interface Floater { el: HTMLDivElement; pos: THREE.Vector3; t: number }
 
 export type PanelKind = 'inv' | 'cha' | 'pip';
@@ -281,18 +287,18 @@ export class UI {
         return `<div class="quest ${q.state === 'rewarded' ? 'done' : ''}"><div class="t">${esc(def.title)}</div><div>${esc(def.desc(q))}</div></div>`;
       })
       .join('') || '<div class="desc">Активных заданий нет. Поговори со Старейшиной.</div>';
-    const days = Math.floor(g.time / 600);
     return `
       <div class="panel-title"><span>ПИП-БОЙ 2000</span><button data-close>Закрыть [P]</button></div>
       <div class="panel-cols">
         <div class="box crt"><h3>Задания</h3>${quests}</div>
         <div class="box crt"><h3>Статус</h3>
-          <div class="row"><span>Дата</span><span class="v">${25 + days} июля 2241</span></div>
-          <div class="row"><span>Местность</span><span class="v">Арройо</span></div>
+          <div class="row"><span>Дата</span><span class="v">${g.dateText()}</span></div>
+          <div class="row"><span>Местность</span><span class="v">${esc(g.location.name)}</span></div>
           <div class="row"><span>Координаты</span><span class="v">${g.player.pos.x.toFixed(0)}, ${g.player.pos.z.toFixed(0)}</span></div>
           <div class="row"><span>Убито врагов</span><span class="v">${g.kills}</span></div>
           <h3 style="margin-top:12px">Заметки</h3>
-          <div>Храм Испытаний — к северу. Гнездо гекконов — к востоку. Нагор живёт у западной хижины.</div>
+          <div>${esc(LOCATION_NOTES[g.location.id] ?? 'Опасная пустошь. Уйти можно через любой край карты.')}</div>
+          <div class="row" style="margin-top:8px"><span>Отряд</span><span class="v">${esc(g.party.map((a) => a.name).join(', ') || 'никого')}</span></div>
         </div>
       </div>`;
   }
@@ -305,6 +311,8 @@ export class UI {
     s.innerHTML = html;
     return s;
   }
+
+  get screenEl() { return $('screen'); }
 
   hideScreen() { $('screen').className = 'hidden'; }
 

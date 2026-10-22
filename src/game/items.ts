@@ -41,6 +41,7 @@ export const ITEMS: Record<string, ItemDef> = {
   },
   hide: { id: 'hide', name: 'Шкура геккона', kind: 'misc', value: 15, desc: 'Прочная чешуйчатая кожа. Пригодится для обмена.' },
   goldHide: { id: 'goldHide', name: 'Шкура золотого геккона', kind: 'misc', value: 60, desc: 'Переливается на солнце. Ценный трофей.' },
+  caps: { id: 'caps', name: 'Крышки', kind: 'misc', value: 1, desc: 'Бутылочные крышки — деньги пустоши.' },
   flint: { id: 'flint', name: 'Кремень', kind: 'misc', value: 5, desc: 'Острый камень. Хорош для наконечников.' },
 };
 

@@ -4,26 +4,28 @@ import { tickTimers } from '../core/clock';
 import { Renderer } from '../engine/renderer';
 import { Effects } from '../engine/effects';
 import { World, type Interactable } from '../world/world';
-import type { NavGrid, Cell } from '../world/nav';
+import type { Cell } from '../world/nav';
 import { heightAt } from '../world/terrain';
-import { DOG_SPOT, NEST, PEN } from '../world/config';
-import { Actor, type ActorDef } from '../entities/actor';
-import { HumanoidRig, LizardRig, QuadrupedRig, type HumanoidLook, type WeaponVisual } from '../entities/rigs';
+import { LOCATIONS, WORLD_MAP } from '../world/locations';
+import { ARROYO, NAGOR_HOME } from '../world/locations/arroyo';
+import { makeEncounter, ENCOUNTER_NAMES, type EncounterKind } from '../world/locations/encounter';
+import type { LocationDef } from '../world/locations/types';
+import { Actor } from '../entities/actor';
+import { HumanoidRig, LizardRig, QuadrupedRig } from '../entities/rigs';
 import { Character, type SkillId } from './character';
-import { Inventory, ITEMS, type WeaponStats } from './items';
+import { Inventory, ITEMS } from './items';
 import { Combat } from './combat';
 import { DIALOGUES, resolveText, type DialogueDef, type DialogueOption } from './dialogues';
-import { GECKO_GOAL, QUESTS, type QuestState } from './quests';
+import { QUESTS, QUEST_GOALS, type QuestState } from './quests';
+import { dog as makeDog, sulik as makeSulik } from './bestiary';
 import { UI } from '../ui/ui';
+import { showWorldMap } from '../ui/worldmap';
 
-type Mode = 'menu' | 'explore' | 'combat' | 'dialogue' | 'dead';
+type Mode = 'menu' | 'explore' | 'combat' | 'dialogue' | 'dead' | 'map';
 
 const SAVE_KEY = 'wasteland2241.save';
 const LOAD_FLAG = 'wasteland2241.loadOnStart';
-const NAGOR_HOME = { x: -12.5, z: 9.5 };
-
-const GECKO_BITE: WeaponStats = { skill: 'unarmed', dmg: [1, 3], ap: 3, range: 1.5, melee: true, visual: 'none' };
-const GOLDEN_BITE: WeaponStats = { skill: 'unarmed', dmg: [2, 6], ap: 3, range: 1.5, melee: true, visual: 'none' };
+const MONTHS = ['января', 'февраля', 'марта', 'апреля', 'мая', 'июня', 'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря'];
 
 interface Hover {
   actor?: Actor;
@@ -31,25 +33,48 @@ interface Hover {
   cell?: Cell;
 }
 
+interface SaveData {
+  v: 2;
+  char: ReturnType<Character['toJSON']>;
+  inv: ReturnType<Inventory['toJSON']>;
+  loc: { id: string; kind?: EncounterKind; seed?: number };
+  pos: [number, number];
+  quests: Record<string, QuestState>;
+  flags: string[];
+  locState: Record<string, { dead: string[] }>;
+  discovered: string[];
+  worldPos: { x: number; y: number };
+  days: number;
+  kills: number;
+  questKills: Record<string, number>;
+}
+
 export class Game {
   readonly r: Renderer;
-  readonly world: World;
-  readonly nav: NavGrid;
   readonly ui: UI;
   readonly effects: Effects;
+  world!: World;
+  location!: LocationDef;
+  private encounterInfo: { kind: EncounterKind; seed: number } | null = null;
 
   char = new Character();
   inv = new Inventory();
   quests: Record<string, QuestState> = {};
   flags = new Set<string>();
+  /** Состояние локаций между визитами: кто уже убит. */
+  locState: Record<string, { dead: string[] }> = {};
+  discovered = new Set<string>(['arroyo', 'klamath']);
+  worldPos: { x: number; y: number } = { x: WORLD_MAP.arroyo.x, y: WORLD_MAP.arroyo.y };
+  days = 0;
   actors: Actor[] = [];
-  player!: Actor;
-  dog!: Actor;
+  readonly player: Actor;
+  readonly dog: Actor;
   mode: Mode = 'menu';
   combat: Combat | null = null;
   time = 0;
   kills = 0;
-  nestKills = 0;
+  /** Убийства по меткам заданий (nest, rats). */
+  questKills: Record<string, number> = {};
   helpHidden = false;
 
   private camYaw = 2.55;
@@ -78,13 +103,11 @@ export class Game {
   private previewKey = '';
   private previewCost = 0;
   private pendingAttack: Actor | null = null;
+  private exitArmed = false;
   private lastTime = performance.now();
 
   constructor(container: HTMLElement) {
     this.r = new Renderer(container);
-    this.world = new World();
-    this.nav = this.world.nav;
-    this.r.scene.add(this.world.group);
     this.effects = new Effects(this.r.scene);
     this.ui = new UI(this);
 
@@ -114,95 +137,145 @@ export class Game {
     this.moveMarker.visible = false;
     this.r.scene.add(this.moveMarker);
 
-    this.spawnActors();
+    this.player = new Actor({
+      id: 'player',
+      name: 'Вы',
+      faction: 'player',
+      rig: new HumanoidRig({ skin: '#c48a60', cloth: '#6e5038', hair: '#3a2516', build: 1.05 }),
+      hp: 30,
+      ap: 8,
+      ac: 5,
+      speed: 4,
+    });
+    this.dog = makeDog();
+
+    this.enterLocation(ARROYO, 'default');
     this.bindInput();
     this.r.renderer.setAnimationLoop(() => this.frame());
   }
 
-  // ─── Население ─────────────────────────────────────────────────────────────
+  get nav() { return this.world.nav; }
+
+  // ─── Локации ───────────────────────────────────────────────────────────────
 
   private addActor(a: Actor, x: number, z: number, proxyR = 0.5) {
     a.place(x, z);
     a.heading = Math.random() * Math.PI * 2;
     this.r.scene.add(a.object);
-    const h = Math.max(0.8, a.rig.height);
-    const proxy = new THREE.Mesh(new THREE.CylinderGeometry(proxyR, proxyR, h, 8));
-    proxy.visible = false;
-    proxy.position.y = h / 2;
-    proxy.userData.actor = a;
-    a.object.add(proxy);
+    let proxy = a.object.children.find((c) => c.userData.actor === a) as THREE.Mesh | undefined;
+    if (!proxy) {
+      const h = Math.max(0.8, a.rig.height);
+      proxy = new THREE.Mesh(new THREE.CylinderGeometry(proxyR, proxyR, h, 8));
+      proxy.visible = false;
+      proxy.position.y = h / 2;
+      proxy.userData.actor = a;
+      a.object.add(proxy);
+    }
     this.hitProxies.push(proxy);
     this.actors.push(a);
     return a;
   }
 
-  private human(id: string, name: string, look: HumanoidLook, weapon: WeaponVisual, def: Partial<ActorDef>): Actor {
-    const rig = new HumanoidRig(look);
-    rig.setWeapon(weapon);
-    return new Actor({ id, name, faction: 'villager', rig, hp: 30, ap: 8, ac: 5, speed: 3.2, ...def });
+  /** Добавляет актёра локации, если он не погиб в прошлый визит. */
+  spawn(a: Actor, x: number, z: number, proxyR = 0.5) {
+    if (this.locState[this.location.id]?.dead.includes(a.id)) return null;
+    return this.addActor(a, x, z, proxyR);
   }
 
-  private gecko(id: string, golden: boolean, tag?: string): Actor {
-    const rig = golden ? new LizardRig('#c9a03a', '#ecd99a', 1.35) : new LizardRig('#76864e', '#cbbb8a', 1);
-    return new Actor({
-      id,
-      name: golden ? 'Золотой геккон' : 'Геккон',
-      faction: 'hostile',
-      rig,
-      hp: golden ? 24 : 11,
-      ap: golden ? 7 : 6,
-      ac: golden ? 7 : 4,
-      skill: golden ? 50 : 40,
-      attack: golden ? GOLDEN_BITE : GECKO_BITE,
-      xp: golden ? 150 : 60,
-      sequence: golden ? 9 : 7,
-      speed: 3.8,
-      tag,
-      loot: golden ? [['goldHide', 1, 1]] : [['hide', 0, 1]],
-      wanderRadius: 4,
-      detectRadius: golden ? 6 : 8,
-    });
-  }
+  isInParty(a: Actor) { return a.follow === this.player && !a.dead; }
+  get party() { return this.actors.filter((a) => this.isInParty(a)); }
 
-  private spawnActors() {
-    const skinA = '#c48a60';
-    const skinB = '#a8724e';
-    this.player = this.addActor(
-      new Actor({
-        id: 'player',
-        name: 'Вы',
-        faction: 'player',
-        rig: new HumanoidRig({ skin: skinA, cloth: '#6e5038', hair: '#3a2516', build: 1.05 }),
-        hp: 30,
-        ap: 8,
-        ac: 5,
-        speed: 4,
-      }),
-      2,
-      6,
-    );
-
-    this.addActor(this.human('elder', 'Старейшина', { skin: '#b0805e', cloth: '#5a3d2a', hair: '#d8d4cc', top: '#7a2e22', beard: true, scale: 0.96 }, 'staff', { dialogue: 'elder' }), 0, -11.5);
-    this.addActor(this.human('hakunin', 'Хакунин', { skin: skinB, cloth: '#3e3428', hair: '#4a4a48', top: '#2f5a6a', beard: true }, 'staff', { dialogue: 'hakunin', wanderRadius: 2 }), 9, -4.5);
-    this.addActor(this.human('nagor', 'Нагор', { skin: '#c08a62', cloth: '#7b5a3c', hair: '#2a1a10' }, 'none', { dialogue: 'nagor', wanderRadius: 3 }), NAGOR_HOME.x, NAGOR_HOME.z);
-    this.addActor(this.human('hunter1', 'Охотник', { skin: skinB, cloth: '#5e4a36', hair: '#1e140c', build: 1.1 }, 'spear', { dialogue: 'villager', wanderRadius: 8 }), -5, -4);
-    this.addActor(this.human('hunter2', 'Охотница', { skin: skinA, cloth: '#6a4030', hair: '#2a1a10', top: '#8a5a3a', build: 0.9 }, 'spear', { dialogue: 'villager', wanderRadius: 7 }), 12, 14);
-    this.addActor(this.human('woman1', 'Жительница', { skin: '#b98260', cloth: '#7a6040', hair: '#20140c', top: '#9a7a4a', build: 0.88 }, 'none', { dialogue: 'villager', wanderRadius: 6 }), 6, 10);
-    this.addActor(this.human('kid', 'Ребёнок', { skin: skinA, cloth: '#6e5038', hair: '#3a2516', scale: 0.62 }, 'none', { dialogue: 'villager', wanderRadius: 6, speed: 2.6 }), 3, 3.5);
-
-    for (let i = 0; i < 2; i++) {
-      const rig = new QuadrupedRig({ color: '#8a6a50', secondary: '#4f3d2e', heads: 2, bodyLen: 1.3, bodyR: 0.5, legLen: 0.75, horns: true, tailLen: 0.6 });
-      this.addActor(new Actor({ id: `brahmin${i}`, name: 'Брамин', faction: 'animal', rig, hp: 40, ap: 6, ac: 2, speed: 1.4, wanderRadius: 2.5 }), PEN.x - 1.5 + i * 3, PEN.z + (i ? 1 : -1), 0.9);
+  enterLocation(def: LocationDef, entry: string, at?: [number, number]) {
+    const party = this.actors.filter((a) => this.isInParty(a));
+    for (const a of this.actors) {
+      a.stop();
+      this.r.scene.remove(a.object);
+      // Персистентные актёры (игрок, отряд, пёс) живут между локациями.
+      if (a !== this.player && a !== this.dog && !party.includes(a)) {
+        a.object.traverse((o) => {
+          const m = o as THREE.Mesh;
+          m.geometry?.dispose();
+        });
+      }
     }
+    if (this.world) {
+      this.r.scene.remove(this.world.group);
+      this.world.dispose();
+    }
+    this.combat = null;
+    this.pendingAttack = null;
+    this.actors = [];
+    this.hitProxies = [];
+    this.location = def;
+    if (def.id === 'encounter') this.locState.encounter = { dead: [] };
+    this.locState[def.id] ??= { dead: [] };
+    this.world = new World(def);
+    this.r.scene.add(this.world.group);
 
-    const dogRig = new QuadrupedRig({ color: '#8a8580', secondary: '#4d4945', heads: 1, bodyLen: 0.55, bodyR: 0.2, legLen: 0.38, ears: true, tailLen: 0.35 });
-    this.dog = this.addActor(new Actor({ id: 'dog', name: 'Дымок', faction: 'animal', rig: dogRig, hp: 20, ap: 8, ac: 6, speed: 4.2, wanderRadius: 2 }), DOG_SPOT.x, DOG_SPOT.z, 0.5);
+    const [x, z] = at ?? def.entries[entry] ?? def.entries.default;
+    this.addActor(this.player, x, z);
+    party.forEach((a, i) => this.addActor(a, x + Math.cos(i * 2 + 1) * 1.8, z + Math.sin(i * 2 + 1) * 1.8));
+    def.spawn(this);
+    this.camTarget.copy(this.player.pos);
+    this.exitArmed = false;
+  }
 
-    const nestSpots: [number, number][] = [[2, 3], [-2, -2], [3, -3], [-1, 3.5]];
-    nestSpots.forEach(([dx, dz], i) => this.addActor(this.gecko(`gecko${i}`, false, 'nest'), NEST.x + dx, NEST.z + dz));
-    this.addActor(this.gecko('goldgecko', true, 'nest'), NEST.x + 4, NEST.z, 0.7);
-    this.addActor(this.gecko('wildgecko0', false), DOG_SPOT.x + 9, DOG_SPOT.z + 6);
-    this.addActor(this.gecko('wildgecko1', false), DOG_SPOT.x + 7, DOG_SPOT.z + 9);
+  discover(id: string) {
+    if (this.discovered.has(id)) return;
+    this.discovered.add(id);
+    this.ui.log(`На карте отмечено: ${WORLD_MAP[id].label}.`, 'warn');
+  }
+
+  dateText(days = this.days) {
+    const d = new Date(2241, 6, 25 + Math.floor(days));
+    return `${d.getDate()} ${MONTHS[d.getMonth()]} ${d.getFullYear()}`;
+  }
+
+  private openWorldMap() {
+    this.mode = 'map';
+    this.ui.closePanel();
+    this.ui.showHud(false);
+    this.ui.tooltip(null);
+    const here = WORLD_MAP[this.location.id] ? this.location.id : null;
+    if (here) this.worldPos = { x: WORLD_MAP[here].x, y: WORLD_MAP[here].y };
+    let encounterBudget = 0;
+    showWorldMap(this.ui.screenEl, {
+      pos: this.worldPos,
+      days: this.days,
+      discovered: [...this.discovered],
+      here,
+      dateText: (d) => this.dateText(d),
+      encounterCheck: (dist) => {
+        encounterBudget += dist;
+        // Примерно одна встреча на 25 единиц пути.
+        if (encounterBudget > 4 && Math.random() < dist * 0.04) return true;
+        return false;
+      },
+      onEnter: (id, pos, days) => {
+        this.worldPos = pos;
+        this.days = days;
+        this.ui.hideScreen();
+        this.encounterInfo = null;
+        this.enterLocation(LOCATIONS[id], 'world');
+        this.mode = 'explore';
+        this.ui.showHud(true);
+        this.ui.banner(LOCATIONS[id].name.toUpperCase(), 2);
+        this.ui.log(`Вы прибыли: ${LOCATIONS[id].name}.`);
+      },
+      onEncounter: (pos, days) => {
+        this.worldPos = pos;
+        this.days = days;
+        this.ui.hideScreen();
+        const roll = Math.random();
+        const kind: EncounterKind = roll < 0.35 ? 'geckos' : roll < 0.6 ? 'rats' : roll < 0.9 ? 'bandits' : 'quiet';
+        this.encounterInfo = { kind, seed: Math.floor(Math.random() * 1e6) };
+        this.enterLocation(makeEncounter(kind, this.encounterInfo.seed), 'world');
+        this.mode = 'explore';
+        this.ui.showHud(true);
+        this.ui.banner('СЛУЧАЙНАЯ ВСТРЕЧА', 2);
+        this.ui.log(`Случайная встреча: ${ENCOUNTER_NAMES[kind]}. Уйти можно через любой край карты.`, 'warn');
+      },
+    });
   }
 
   // ─── Начало игры, сохранение, загрузка ─────────────────────────────────────
@@ -213,10 +286,14 @@ export class Game {
     this.inv.add('spear');
     this.inv.add('powder', 2);
     this.inv.add('flint');
+    this.inv.add('caps', 25);
     this.inv.equipped = 'spear';
+    const [x, z] = ARROYO.entries.default;
+    this.player.place(x, z);
     this.startPlaying();
     this.ui.log(`${c.name}, добро пожаловать в Арройо.`, 'good');
     this.ui.log('Поговори со Старейшиной у большой хижины на севере деревни.');
+    this.ui.log('Южная тропа ведёт к выходу на карту мира.');
     this.ui.banner('АРРОЙО', 2.5);
   }
 
@@ -236,17 +313,20 @@ export class Game {
       this.ui.log('Сохраниться можно только вне боя и диалога.', 'warn');
       return;
     }
-    const data = {
-      v: 1,
+    const data: SaveData = {
+      v: 2,
       char: this.char.toJSON(),
       inv: this.inv.toJSON(),
+      loc: this.encounterInfo ? { id: 'encounter', ...this.encounterInfo } : { id: this.location.id },
       pos: [this.player.pos.x, this.player.pos.z],
       quests: this.quests,
       flags: [...this.flags],
-      dead: this.actors.filter((a) => a.dead).map((a) => a.id),
+      locState: this.locState,
+      discovered: [...this.discovered],
+      worldPos: this.worldPos,
+      days: this.days,
       kills: this.kills,
-      nestKills: this.nestKills,
-      time: this.time,
+      questKills: this.questKills,
     };
     try {
       localStorage.setItem(SAVE_KEY, JSON.stringify(data));
@@ -258,7 +338,8 @@ export class Game {
 
   static hasSave(): boolean {
     try {
-      return !!localStorage.getItem(SAVE_KEY);
+      const d = JSON.parse(localStorage.getItem(SAVE_KEY) ?? 'null');
+      return d?.v === 2;
     } catch {
       return false;
     }
@@ -289,43 +370,46 @@ export class Game {
   }
 
   loadFromStorage(): boolean {
-    let d;
+    let d: SaveData | null;
     try {
       d = JSON.parse(localStorage.getItem(SAVE_KEY) ?? 'null');
     } catch {
       d = null;
     }
-    if (!d || d.v !== 1) return false;
+    if (!d || d.v !== 2) return false;
     this.char = Character.fromJSON(d.char);
     this.inv = Inventory.fromJSON(d.inv);
     this.quests = d.quests;
     this.flags = new Set(d.flags);
+    this.locState = d.locState;
+    this.discovered = new Set(d.discovered);
+    this.worldPos = d.worldPos;
+    this.days = d.days;
     this.kills = d.kills;
-    this.nestKills = d.nestKills;
-    this.time = d.time;
-    this.player.place(d.pos[0], d.pos[1]);
-    for (const id of d.dead as string[]) {
-      const a = this.actors.find((x) => x.id === id);
-      if (a) this.removeActor(a);
+    this.questKills = d.questKills;
+    // Восстанавливаем отряд до входа в локацию, чтобы он появился рядом с игроком.
+    const restored: Actor[] = [];
+    if (this.flags.has('dogFound') && this.quests.dog?.state !== 'rewarded' && !this.flags.has('dogDead')) restored.push(this.dog);
+    if (this.flags.has('sulikJoined') && !this.flags.has('sulikDead')) restored.push(makeSulik());
+    for (const a of restored) this.joinParty(a);
+    this.actors = [...new Set([...this.actors, ...restored])];
+    if (d.loc.id === 'encounter' && d.loc.kind && d.loc.seed !== undefined) {
+      this.encounterInfo = { kind: d.loc.kind, seed: d.loc.seed };
+      this.enterLocation(makeEncounter(d.loc.kind, d.loc.seed), 'default', d.pos);
+    } else {
+      this.enterLocation(LOCATIONS[d.loc.id] ?? ARROYO, 'default', d.pos);
     }
-    if (this.flags.has('dogFound')) {
-      this.dog.faction = 'companion';
-      if (this.quests.dog?.state === 'rewarded') this.settleDog(true);
-      else {
-        this.dog.follow = this.player;
-        this.dog.place(d.pos[0] + 1.5, d.pos[1] + 1);
-      }
-    }
+    this.exitArmed = true;
     this.startPlaying();
     this.ui.log('Игра загружена.', 'good');
     return true;
   }
 
-  private removeActor(a: Actor) {
-    a.dead = true;
-    this.r.scene.remove(a.object);
-    this.actors = this.actors.filter((x) => x !== a);
-    this.hitProxies = this.hitProxies.filter((p) => p.userData.actor !== a);
+  private joinParty(a: Actor) {
+    a.faction = 'companion';
+    a.follow = this.player;
+    a.wanderRadius = 0;
+    if (a.rig instanceof QuadrupedRig) a.rig.wag = 1;
   }
 
   // ─── API для диалогов и интерфейса ─────────────────────────────────────────
@@ -336,6 +420,13 @@ export class Game {
     this.inv.add(id, n);
     this.ui.log(`Получено: ${ITEMS[id].name}${n > 1 ? ` ×${n}` : ''}.`, 'good');
     this.ui.updateHud();
+  }
+
+  takeItem(id: string, n = 1): boolean {
+    if (!this.inv.remove(id, n)) return false;
+    this.ui.log(`Отдано: ${ITEMS[id].name}${n > 1 ? ` ×${n}` : ''}.`);
+    this.ui.updateHud();
+    return true;
   }
 
   addXp(n: number) {
@@ -354,18 +445,30 @@ export class Game {
     if (this.quests[id]) return;
     this.quests[id] = { state: 'active', progress: 0 };
     this.ui.log(`Новое задание: «${QUESTS[id].title}».`, 'warn');
-    if (id === 'geckos') this.updateGeckoQuest();
+    this.updateKillQuests();
     if (id === 'dog' && this.flags.has('dogFound')) this.quests.dog.state = 'done';
   }
 
-  private updateGeckoQuest() {
-    const q = this.quests.geckos;
-    if (!q || q.state !== 'active') return;
-    q.progress = Math.min(GECKO_GOAL, this.nestKills);
-    if (q.progress >= GECKO_GOAL) {
-      q.state = 'done';
-      this.ui.log('Гнездо уничтожено. Вернись к Старейшине.', 'warn');
-      this.ui.banner('ЗАДАНИЕ ВЫПОЛНЕНО', 2);
+  /** Переводит сюжетное задание на следующую стадию (не назад). */
+  advanceQuest(id: string, stage: number) {
+    this.startQuest(id);
+    const q = this.quests[id];
+    if (q.progress < stage) {
+      q.progress = stage;
+      this.ui.log(`Задание обновлено: «${QUESTS[id].title}».`, 'warn');
+    }
+  }
+
+  private updateKillQuests() {
+    for (const [id, goal] of Object.entries(QUEST_GOALS)) {
+      const q = this.quests[id];
+      if (!q || q.state !== 'active') continue;
+      q.progress = Math.min(goal.count, this.questKills[goal.tag] ?? 0);
+      if (q.progress >= goal.count) {
+        q.state = 'done';
+        this.ui.log(goal.doneText, 'warn');
+        this.ui.banner('ЗАДАНИЕ ВЫПОЛНЕНО', 2);
+      }
     }
   }
 
@@ -374,15 +477,29 @@ export class Game {
     this.quests.dog.state = 'rewarded';
     this.giveItem('powder', 2);
     this.addXp(250);
-    this.settleDog(false);
-  }
-
-  private settleDog(teleport: boolean) {
     this.dog.follow = null;
+    this.dog.faction = 'animal';
     this.dog.home.set(NAGOR_HOME.x - 1, heightAt(NAGOR_HOME.x - 1, NAGOR_HOME.z + 1), NAGOR_HOME.z + 1);
     this.dog.wanderRadius = 3;
     (this.dog.rig as QuadrupedRig).wag = 0.3;
-    if (teleport) this.dog.place(this.dog.home.x, this.dog.home.z);
+  }
+
+  recruitSulik() {
+    const s = this.actors.find((a) => a.id === 'sulik');
+    if (!s) return;
+    this.flags.add('sulikJoined');
+    this.joinParty(s);
+    this.ui.log('Сулик присоединяется к отряду.', 'good');
+    this.ui.banner('СУЛИК В ОТРЯДЕ', 2);
+  }
+
+  /** Метка «кто-то ушёл из локации навсегда» (освобождённый Вик). */
+  removeFromLocation(id: string) {
+    const a = this.actors.find((x) => x.id === id);
+    if (!a) return;
+    this.r.scene.remove(a.object);
+    this.actors = this.actors.filter((x) => x !== a);
+    this.hitProxies = this.hitProxies.filter((p) => p.userData.actor !== a);
   }
 
   equip(id: string | null) {
@@ -400,15 +517,15 @@ export class Game {
   useItem(id: string) {
     const def = ITEMS[id];
     if (!def.heal || !this.inv.count(id)) return;
+    if (this.char.hp >= this.char.maxHp) {
+      this.ui.log('Вы и так здоровы.');
+      return;
+    }
     if (this.mode === 'combat') {
       if (!this.combat || !this.combat.spendPlayerAp(def.useAp ?? 2)) {
         this.ui.log('Сейчас нельзя: не ваш ход или мало ОД.', 'warn');
         return;
       }
-    }
-    if (this.char.hp >= this.char.maxHp) {
-      this.ui.log('Вы и так здоровы.');
-      return;
     }
     const amount = randInt(def.heal[0], def.heal[1]);
     const healed = Math.min(amount, this.char.maxHp - this.char.hp);
@@ -453,7 +570,7 @@ export class Game {
     void this.combat.run();
   }
 
-  /** Вызывается из Combat в начале хода игрока. */
+  /** Вызывается в начале хода игрока: выполняет атаку, с которой начался бой. */
   onPlayerTurn() {
     if (this.pendingAttack && this.combat) {
       const t = this.pendingAttack;
@@ -482,7 +599,7 @@ export class Game {
     } else target.hp -= dmg;
     const isLizard = target.rig instanceof LizardRig;
     this.effects.hit(target, attacker.pos, isLizard ? new THREE.Color(0.25, 0.3, 0.05) : undefined);
-    this.ui.floatText(target.pos.clone().setY(target.pos.y + target.rig.height + 0.3), `−${dmg}`, target === this.player ? '#ff5a4a' : '#ffd060');
+    this.ui.floatText(target.pos.clone().setY(target.pos.y + target.rig.height + 0.3), `−${dmg}`, target === this.player ? '#ff5a4a' : target.faction === 'companion' ? '#ff9a6a' : '#ffd060');
     target.rig.playHit();
     if (target.hp <= 0) this.kill(target);
     this.ui.updateHud();
@@ -496,6 +613,13 @@ export class Game {
       this.gameOver();
       return;
     }
+    if (target.faction === 'companion') {
+      target.follow = null;
+      this.flags.add(`${target.id}Dead`);
+      this.ui.log(`${target.name} погибает...`, 'bad');
+      return;
+    }
+    this.locState[this.location.id].dead.push(target.id);
     this.kills++;
     this.ui.log(`${target.name} погибает.`, 'good');
     if (target.xp) this.addXp(target.xp);
@@ -503,9 +627,9 @@ export class Game {
       const n = randInt(min, max);
       if (n > 0) this.giveItem(id, n);
     }
-    if (target.tag === 'nest') {
-      this.nestKills++;
-      this.updateGeckoQuest();
+    if (target.tag) {
+      this.questKills[target.tag] = (this.questKills[target.tag] ?? 0) + 1;
+      this.updateKillQuests();
     }
   }
 
@@ -550,17 +674,20 @@ export class Game {
     const o = this.dialogueOptions[i];
     if (!o) return;
     o.action?.(this);
+    if (this.mode !== 'dialogue') return;
     if (o.next) this.showNode(o.next);
     else this.closeDialogue();
   }
 
-  private closeDialogue() {
+  closeDialogue() {
     this.ui.hideDialogue();
     this.dialogueActor = null;
     this.dialogueDef = null;
     if (this.mode === 'dialogue') this.mode = 'explore';
     this.ui.updateHud();
   }
+
+  get talkingTo() { return this.dialogueActor; }
 
   // ─── Перемещение и взаимодействие вне боя ──────────────────────────────────
 
@@ -584,7 +711,7 @@ export class Game {
       return;
     }
     if (a === this.dog) {
-      if (this.dog.faction === 'companion') this.ui.log('Дымок радостно виляет хвостом и тычется носом в ладонь.');
+      if (this.isInParty(a) || this.quests.dog?.state === 'rewarded') this.ui.log('Дымок радостно виляет хвостом и тычется носом в ладонь.');
       else this.findDog();
       return;
     }
@@ -600,9 +727,7 @@ export class Game {
   private findDog() {
     if (this.flags.has('dogFound')) return;
     this.flags.add('dogFound');
-    this.dog.faction = 'companion';
-    this.dog.follow = this.player;
-    (this.dog.rig as QuadrupedRig).wag = 1;
+    this.joinParty(this.dog);
     this.ui.log('Лохматый серый пёс радостно бросается к вам. Это, должно быть, Дымок!', 'good');
     if (this.quests.dog?.state === 'active') {
       this.quests.dog.state = 'done';
@@ -611,7 +736,7 @@ export class Game {
   }
 
   private async onClick() {
-    if (this.mode === 'menu' || this.mode === 'dialogue' || this.mode === 'dead') return;
+    if (this.mode === 'menu' || this.mode === 'dialogue' || this.mode === 'dead' || this.mode === 'map') return;
     if (this.ui.panel) {
       this.ui.closePanel();
       return;
@@ -631,7 +756,7 @@ export class Game {
         this.startCombat(true);
         return;
       }
-      if (await this.walkTo(a.pos, 1.9, token)) this.interactActor(a);
+      if (await this.walkTo(a.pos, 2.6, token)) this.interactActor(a);
       return;
     }
     if (h.inter) {
@@ -683,7 +808,7 @@ export class Game {
   }
 
   private onKey(e: KeyboardEvent) {
-    if (this.mode === 'menu') return;
+    if (this.mode === 'menu' || this.mode === 'map') return;
     if (this.mode === 'dialogue') {
       const n = Number(e.key);
       if (n >= 1 && n <= 9) this.pickOption(n - 1);
@@ -755,7 +880,7 @@ export class Game {
         const s = a.rig instanceof QuadrupedRig && a.rig.height > 1.2 ? 1.6 : a.rig.height < 1 ? 0.9 : 1;
         this.hoverRing.scale.setScalar(s);
         tip = `${a.name}`;
-        if (a.faction === 'hostile') tip += ` — ${this.healthWord(a)}`;
+        if (a.faction === 'hostile' || a.faction === 'companion') tip += ` — ${this.healthWord(a)}`;
         if (a.faction === 'hostile' && this.combat?.isPlayerTurn) {
           const w = this.inv.weapon;
           const plan = this.combat.planPlayerAttack(a);
@@ -781,6 +906,9 @@ export class Game {
         }
         const cell = this.nav.cellOf(ground.x, ground.z);
         if (this.nav.inBounds(cell[0], cell[1])) this.hover.cell = cell;
+        if (!tip && this.mode === 'explore' && this.location.exits.some((e) => Math.hypot(ground.x - e.x, ground.z - e.z) < e.r)) {
+          tip = '<span class="warn">Выход на карту мира</span>';
+        }
       }
     }
 
@@ -857,9 +985,24 @@ export class Game {
         }
       }
     }
-    if (!this.flags.has('dogFound') && this.dog.distanceTo(p) < 3.5) this.findDog();
+    if (this.mode !== 'explore') return;
+    if (this.location.id === 'arroyo' && !this.flags.has('dogFound') && this.actors.includes(this.dog) && this.dog.distanceTo(p) < 3.5) this.findDog();
 
-    // Медленная регенерация вне боя.
+    // Выход на карту мира: срабатывает, только если игрок сначала отошёл от зоны выхода.
+    let inExit = false;
+    let nearExit = false;
+    for (const e of this.location.exits) {
+      const d = Math.hypot(p.pos.x - e.x, p.pos.z - e.z);
+      if (d < e.r) inExit = true;
+      if (d < e.r + 1.5) nearExit = true;
+    }
+    if (!nearExit) this.exitArmed = true;
+    if (inExit && this.exitArmed) {
+      p.stop();
+      this.openWorldMap();
+      return;
+    }
+
     this.regenAcc += dt;
     if (this.regenAcc > 8) {
       this.regenAcc = 0;
@@ -920,8 +1063,10 @@ export class Game {
     const now = performance.now();
     const dt = Math.min(0.05, (now - this.lastTime) / 1000);
     this.lastTime = now;
-    this.time += dt;
-    tickTimers(dt);
+    if (this.mode !== 'map') {
+      this.time += dt;
+      tickTimers(dt);
+    }
 
     if (this.mode === 'explore') {
       this.wasdMove(dt);

@@ -312,3 +312,29 @@ button:disabled { color: #6d6252; cursor: default; }
 .tag.on > span:first-child::before { content: '■ '; }
 .tag:not(.on) > span:first-child::before { content: '□ '; }
 .points { font-size: 22px; color: var(--amber); }
+
+/* ─── Карта мира ─────────────────────────────────────────────────────────── */
+
+.worldmap {
+  display: flex;
+  gap: 12px;
+  padding: 12px;
+  width: min(1240px, calc(100vw - 16px));
+  max-height: calc(100vh - 16px);
+  background: linear-gradient(160deg, #4a4033, var(--metal-2) 50%, var(--metal-3));
+  border: 4px solid var(--rim);
+  border-color: var(--rim) var(--rim-dark) var(--rim-dark) var(--rim);
+  box-shadow: 0 20px 60px #000d;
+}
+.wm-map { flex: 1 1 auto; min-width: 0; border: 3px solid var(--rim-dark); box-shadow: inset 0 0 30px #000; }
+.wm-map canvas { display: block; width: 100%; height: auto; cursor: crosshair; }
+.wm-side { width: 250px; flex: 0 0 250px; padding: 10px 12px; display: flex; flex-direction: column; gap: 10px; }
+.wm-title { font-family: var(--font-head); color: var(--amber); font-size: 22px; letter-spacing: 0.12em; text-shadow: none; }
+.wm-date { font-size: 22px; color: #d6ffd9; }
+.wm-info { font-size: 19px; min-height: 60px; }
+.wm-list { display: flex; flex-direction: column; gap: 6px; }
+.wm-list button { text-transform: none; font-size: 14px; text-align: left; }
+@media (max-width: 760px) {
+  .worldmap { flex-direction: column; }
+  .wm-side { width: auto; flex: none; }
+}

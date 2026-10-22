@@ -3,10 +3,11 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 import { fbm } from '../core/noise';
 import { mulberry32 } from '../core/math';
 import { ParticleSystem } from '../engine/particles';
-import { DOG_SPOT, NEST, PEN, TEMPLE, VILLAGE, WORLD_SIZE } from './config';
+import { WORLD_SIZE } from './config';
 import { NavGrid } from './nav';
-import { buildTerrain, heightAt } from './terrain';
+import { buildTerrain, distToPaths, heightAt, setTerrain, type Circle } from './terrain';
 import { createTextures, type DetailTextures } from './textures';
+import type { LocationDef } from './locations/types';
 
 export interface Interactable {
   id: string;
@@ -17,7 +18,7 @@ export interface Interactable {
 }
 
 /** Смещает вершины шумом от их позиции — общие вершины смещаются одинаково, щелей нет. */
-function jitter(geo: THREE.BufferGeometry, amount: number, freq: number, seed: number): THREE.BufferGeometry {
+export function jitter(geo: THREE.BufferGeometry, amount: number, freq: number, seed: number): THREE.BufferGeometry {
   const pos = geo.attributes.position as THREE.BufferAttribute;
   const v = new THREE.Vector3();
   for (let i = 0; i < pos.count; i++) {
@@ -31,7 +32,7 @@ function jitter(geo: THREE.BufferGeometry, amount: number, freq: number, seed: n
   return geo;
 }
 
-function cylinderBetween(a: THREE.Vector3, b: THREE.Vector3, r0: number, r1: number, seg = 6): THREE.BufferGeometry {
+export function cylinderBetween(a: THREE.Vector3, b: THREE.Vector3, r0: number, r1: number, seg = 6): THREE.BufferGeometry {
   const len = a.distanceTo(b);
   const geo = new THREE.CylinderGeometry(r1, r0, len, seg, 1);
   geo.translate(0, len / 2, 0);
@@ -41,23 +42,51 @@ function cylinderBetween(a: THREE.Vector3, b: THREE.Vector3, r0: number, r1: num
   return geo;
 }
 
+/** Зелёная «сетка выхода» на краю карты, как в оригинале. */
+const exitMaterial = () =>
+  new THREE.ShaderMaterial({
+    uniforms: { uTime: { value: 0 } },
+    transparent: true,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+    vertexShader: /* glsl */ `
+      varying vec2 vUv;
+      void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+    fragmentShader: /* glsl */ `
+      uniform float uTime;
+      varying vec2 vUv;
+      void main() {
+        vec2 p = vUv - 0.5;
+        float r = length(p) * 2.0;
+        if (r > 1.0) discard;
+        vec2 g = abs(fract(vUv * 12.0) - 0.5);
+        float grid = smoothstep(0.42, 0.5, max(g.x, g.y));
+        float pulse = 0.55 + 0.45 * sin(uTime * 2.5 - r * 6.0);
+        float edge = smoothstep(0.8, 1.0, r);
+        float a = (grid * 0.6 + 0.12 + edge * 0.5) * pulse * (1.0 - smoothstep(0.95, 1.0, r));
+        gl_FragColor = vec4(vec3(0.25, 1.4, 0.35) * a, a);
+      }`,
+  });
+
 export class World {
   readonly group = new THREE.Group();
   readonly nav: NavGrid;
   readonly terrain: THREE.Mesh;
   readonly interactables: Interactable[] = [];
-  readonly fire = new ParticleSystem(500, THREE.AdditiveBlending, -1.2, 0.6);
-  readonly smoke = new ParticleSystem(300, THREE.NormalBlending, -0.15, 0.3);
+  readonly fire = new ParticleSystem(700, THREE.AdditiveBlending, -1.2, 0.6);
+  readonly smoke = new ParticleSystem(400, THREE.NormalBlending, -0.15, 0.3);
   readonly dust = new ParticleSystem(400, THREE.NormalBlending, 0, 0);
-  private readonly tex: DetailTextures;
+  readonly tex: DetailTextures;
+  readonly rnd: () => number;
+  readonly mat: Record<string, THREE.MeshStandardMaterial>;
   private readonly timeUniform = { value: 0 };
-  private readonly flames: { pos: THREE.Vector3; light: THREE.PointLight; base: number; scale: number }[] = [];
-  private readonly rnd = mulberry32(2241);
+  private readonly flames: { pos: THREE.Vector3; light: THREE.PointLight | null; base: number; scale: number }[] = [];
+  private readonly exitMats: THREE.ShaderMaterial[] = [];
   private fireAcc = 0;
 
-  readonly mat: Record<string, THREE.MeshStandardMaterial>;
-
-  constructor() {
+  constructor(readonly loc: LocationDef) {
+    setTerrain(loc.terrain);
+    this.rnd = mulberry32(loc.terrain.seed * 7919 + 2241);
     this.tex = createTextures();
     this.terrain = buildTerrain(this.tex);
     this.group.add(this.terrain);
@@ -71,12 +100,17 @@ export class World {
     thatch.repeat.set(6, 1);
     const wood = this.tex.woodMap.clone();
     wood.repeat.set(1, 2);
+    const planks = this.tex.woodMap.clone();
+    planks.repeat.set(3, 1);
+    planks.rotation = Math.PI / 2;
     this.mat = {
       mud: new THREE.MeshStandardMaterial({ color: '#a27a58', map: mudMap, normalMap: rockNormal, roughness: 0.95 }),
       thatch: new THREE.MeshStandardMaterial({ color: '#d8bf86', map: thatch, roughness: 1 }),
       wood: new THREE.MeshStandardMaterial({ color: '#8a6a50', map: wood, roughness: 0.9 }),
+      planks: new THREE.MeshStandardMaterial({ color: '#9a7a5c', map: planks, roughness: 0.9 }),
       darkWood: new THREE.MeshStandardMaterial({ color: '#4a3526', map: wood, roughness: 0.9 }),
       stone: new THREE.MeshStandardMaterial({ color: '#a39282', normalMap: rockNormal, roughness: 0.92 }),
+      concrete: new THREE.MeshStandardMaterial({ color: '#8f8a82', map: mudMap, normalMap: rockNormal, roughness: 0.95 }),
       rock: new THREE.MeshStandardMaterial({ color: '#9a7058', normalMap: rockNormal, roughness: 0.95 }),
       bone: new THREE.MeshStandardMaterial({ color: '#e6dcc4', roughness: 0.7 }),
       void: new THREE.MeshStandardMaterial({ color: '#070504', roughness: 1 }),
@@ -85,21 +119,25 @@ export class World {
       paintBlue: new THREE.MeshStandardMaterial({ color: '#2f5a74', map: wood, roughness: 0.85 }),
       plant: new THREE.MeshStandardMaterial({ color: '#6f7a45', roughness: 0.9 }),
       egg: new THREE.MeshStandardMaterial({ color: '#d9cfa8', roughness: 0.5 }),
+      rust: new THREE.MeshStandardMaterial({ color: '#7a4a32', normalMap: rockNormal, roughness: 0.75, metalness: 0.45 }),
+      metal: new THREE.MeshStandardMaterial({ color: '#6c6a66', roughness: 0.5, metalness: 0.7 }),
+      tin: new THREE.MeshStandardMaterial({ color: '#6e645a', normalMap: rockNormal, roughness: 0.75, metalness: 0.35 }),
+      rubber: new THREE.MeshStandardMaterial({ color: '#1c1a18', roughness: 0.9 }),
+      glow: new THREE.MeshStandardMaterial({ color: '#ffcf8a', emissive: '#ffa040', emissiveIntensity: 1.5 }),
     };
 
-    this.buildVillage();
-    this.buildTemple();
-    this.buildNest();
-    this.buildDogSpot();
-    this.scatterRocks();
-    this.scatterTrees();
-    this.scatterGrass();
+    loc.build(this);
+    this.buildExits(loc.exits);
+    const reserved = [...loc.scatter.reserved, ...loc.exits.map((e) => ({ ...e, r: e.r + 3 }))];
+    this.scatterRocks(loc.scatter.rocks, reserved);
+    this.scatterTrees(loc.scatter.trees, reserved);
+    this.scatterGrass(loc.scatter.grass, reserved);
     this.group.add(this.fire.points, this.smoke.points, this.dust.points);
   }
 
-  private y(x: number, z: number) { return heightAt(x, z); }
+  y(x: number, z: number) { return heightAt(x, z); }
 
-  private place(obj: THREE.Object3D, x: number, z: number, rotY = 0, sink = 0.1) {
+  place(obj: THREE.Object3D, x: number, z: number, rotY = 0, sink = 0.1) {
     obj.position.set(x, this.y(x, z) - sink, z);
     obj.rotation.y = rotY;
     obj.traverse((o) => {
@@ -112,26 +150,42 @@ export class World {
     return obj;
   }
 
-  // ─── Деревня ──────────────────────────────────────────────────────────────
+  /** Для построек: опускаем основание до самой низкой точки площадки. */
+  placeFlat(obj: THREE.Object3D, x: number, z: number, rotY: number, radius: number) {
+    let min = Infinity;
+    for (let a = 0; a < 8; a++) min = Math.min(min, this.y(x + Math.cos(a) * radius, z + Math.sin(a) * radius));
+    min = Math.min(min, this.y(x, z));
+    this.place(obj, x, z, rotY, 0);
+    obj.position.y = min - 0.1;
+    return obj;
+  }
 
-  private hut(r: number, h: number, seed: number): THREE.Group {
+  dispose() {
+    this.group.traverse((o) => {
+      const m = o as THREE.Mesh;
+      if (m.geometry) m.geometry.dispose();
+      const mats = m.material ? (Array.isArray(m.material) ? m.material : [m.material]) : [];
+      for (const mt of mats) mt.dispose();
+    });
+  }
+
+  // ─── Библиотека построек и реквизита ──────────────────────────────────────
+
+  hut(r: number, h: number, seed: number): THREE.Group {
     const g = new THREE.Group();
     const walls = jitter(new THREE.CylinderGeometry(r, r * 1.08, h, 28, 4), 0.25, 0.8, seed);
     const wallMesh = new THREE.Mesh(walls, this.mat.mud);
     wallMesh.position.y = h / 2;
     g.add(wallMesh);
-    const roofGeo = jitter(new THREE.ConeGeometry(r * 1.42, h * 1.05, 28, 5), 0.35, 0.6, seed + 5);
-    const roof = new THREE.Mesh(roofGeo, this.mat.thatch);
+    const roof = new THREE.Mesh(jitter(new THREE.ConeGeometry(r * 1.42, h * 1.05, 28, 5), 0.35, 0.6, seed + 5), this.mat.thatch);
     roof.position.y = h + h * 0.45;
     g.add(roof);
-    // Пучок стеблей на макушке крыши.
     const tip = new THREE.Mesh(new THREE.ConeGeometry(0.25, 0.9, 6), this.mat.darkWood);
     tip.position.y = h + h * 1.05;
     g.add(tip);
     const door = new THREE.Mesh(new THREE.BoxGeometry(1.0, 1.7, 0.5), this.mat.void);
     door.position.set(0, 0.85, r * 0.95);
     g.add(door);
-    // Обрамление входа.
     for (const sx of [-1, 1]) {
       const post = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.08, 1.9, 6), this.mat.darkWood);
       post.position.set(sx * 0.58, 0.95, r * 1.02);
@@ -144,14 +198,204 @@ export class World {
     return g;
   }
 
-  private pot(): THREE.Mesh {
-    const pts = [
-      [0.0, 0], [0.18, 0], [0.26, 0.12], [0.3, 0.3], [0.24, 0.48], [0.14, 0.56], [0.16, 0.62],
-    ].map(([x, y]) => new THREE.Vector2(x, y));
+  /** Дощатая хибара с двускатной крышей; дверь смотрит в +Z. */
+  shack(w: number, d: number, h: number, seed: number, opts: { porch?: boolean; sign?: string } = {}): THREE.Group {
+    const g = new THREE.Group();
+    const body = new THREE.Mesh(jitter(new THREE.BoxGeometry(w, h, d, 4, 3, 4), 0.06, 1, seed), this.mat.planks);
+    body.position.y = h / 2;
+    g.add(body);
+    // Двускатная крыша из двух наклонных плит.
+    const roofW = w / 2 / Math.cos(0.45) + 0.3;
+    for (const sx of [-1, 1]) {
+      const slab = new THREE.Mesh(new THREE.BoxGeometry(roofW, 0.12, d + 0.6), this.mat.tin);
+      slab.position.set(sx * w * 0.25, h + Math.tan(0.45) * w * 0.25, 0);
+      slab.rotation.z = -sx * 0.45;
+      g.add(slab);
+    }
+    const gable = new THREE.Shape([new THREE.Vector2(-w / 2, 0), new THREE.Vector2(w / 2, 0), new THREE.Vector2(0, Math.tan(0.45) * w / 2)]);
+    for (const sz of [-1, 1]) {
+      const tri = new THREE.Mesh(new THREE.ShapeGeometry(gable), this.mat.planks);
+      tri.position.set(0, h, sz * (d / 2 + 0.01));
+      if (sz < 0) tri.rotation.y = Math.PI;
+      g.add(tri);
+    }
+    const door = new THREE.Mesh(new THREE.BoxGeometry(1.0, 1.9, 0.12), this.mat.void);
+    door.position.set(0, 0.95, d / 2 + 0.01);
+    g.add(door);
+    for (const sx of [-1, 1]) {
+      const win = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.55, 0.1), this.mat.void);
+      win.position.set(sx * w * 0.3, h * 0.6, d / 2 + 0.02);
+      g.add(win);
+      const frame = new THREE.Mesh(new THREE.BoxGeometry(0.85, 0.08, 0.14), this.mat.darkWood);
+      frame.position.set(sx * w * 0.3, h * 0.6 - 0.32, d / 2 + 0.04);
+      g.add(frame);
+    }
+    if (opts.porch) {
+      const deck = new THREE.Mesh(new THREE.BoxGeometry(w, 0.15, 2), this.mat.darkWood);
+      deck.position.set(0, 0.08, d / 2 + 1);
+      g.add(deck);
+      for (const sx of [-1, 1]) {
+        const post = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, h * 0.85, 6), this.mat.darkWood);
+        post.position.set(sx * (w / 2 - 0.2), h * 0.42, d / 2 + 1.9);
+        g.add(post);
+      }
+      const awning = new THREE.Mesh(new THREE.BoxGeometry(w + 0.2, 0.08, 2.3), this.mat.tin);
+      awning.position.set(0, h * 0.86, d / 2 + 1.1);
+      awning.rotation.x = 0.12;
+      g.add(awning);
+    }
+    if (opts.sign) {
+      const board = new THREE.Mesh(new THREE.BoxGeometry(Math.min(w * 0.7, 4), 0.6, 0.08), this.mat.paintRed);
+      board.position.set(0, h + 0.15, d / 2 + 0.1);
+      g.add(board);
+    }
+    return g;
+  }
+
+  waterTower(): THREE.Group {
+    const g = new THREE.Group();
+    for (const [x, z] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
+      const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.12, 6, 6), this.mat.darkWood);
+      leg.position.set(x * 1.1, 3, z * 1.1);
+      leg.rotation.set(-z * 0.05, 0, x * 0.05);
+      g.add(leg);
+    }
+    const tank = new THREE.Mesh(new THREE.CylinderGeometry(1.7, 1.7, 2.4, 20), this.mat.planks);
+    tank.position.y = 7.2;
+    g.add(tank);
+    const cap = new THREE.Mesh(new THREE.ConeGeometry(1.9, 1, 20), this.mat.tin);
+    cap.position.y = 8.9;
+    g.add(cap);
+    for (const y of [6.4, 8]) {
+      const band = new THREE.Mesh(new THREE.TorusGeometry(1.72, 0.04, 4, 24), this.mat.rust);
+      band.rotation.x = Math.PI / 2;
+      band.position.y = y;
+      g.add(band);
+    }
+    return g;
+  }
+
+  pot(): THREE.Mesh {
+    const pts = [[0.0, 0], [0.18, 0], [0.26, 0.12], [0.3, 0.3], [0.24, 0.48], [0.14, 0.56], [0.16, 0.62]].map(([x, y]) => new THREE.Vector2(x, y));
     return new THREE.Mesh(new THREE.LatheGeometry(pts, 14), this.mat.clay);
   }
 
-  private totem(): THREE.Group {
+  barrel(burning: boolean): THREE.Group {
+    const g = new THREE.Group();
+    const b = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.3, 0.9, 14, 1, burning), this.mat.rust);
+    b.position.y = 0.45;
+    g.add(b);
+    for (const y of [0.2, 0.7]) {
+      const ring = new THREE.Mesh(new THREE.TorusGeometry(0.325, 0.025, 4, 16), this.mat.metal);
+      ring.rotation.x = Math.PI / 2;
+      ring.position.y = y;
+      g.add(ring);
+    }
+    return g;
+  }
+
+  burningBarrel(x: number, z: number) {
+    this.place(this.barrel(true), x, z, 0, 0.02);
+    this.addFlame(new THREE.Vector3(x, this.y(x, z) + 0.85, z), 9, 0.5);
+    this.nav.blockCircle(x, z, 0.5);
+  }
+
+  crate(s = 0.8): THREE.Mesh {
+    return new THREE.Mesh(new THREE.BoxGeometry(s, s, s), this.mat.wood);
+  }
+
+  tire(): THREE.Mesh {
+    const t = new THREE.Mesh(new THREE.TorusGeometry(0.32, 0.13, 8, 16), this.mat.rubber);
+    t.rotation.x = Math.PI / 2;
+    t.position.y = 0.13;
+    return t;
+  }
+
+  /** Ржавый остов довоенного автомобиля. */
+  carWreck(seed: number): THREE.Group {
+    const g = new THREE.Group();
+    const body = new THREE.Mesh(jitter(new THREE.BoxGeometry(1.9, 0.7, 4.4, 4, 2, 6), 0.12, 1.5, seed), this.mat.rust);
+    body.position.y = 0.6;
+    g.add(body);
+    const cabin = new THREE.Mesh(jitter(new THREE.BoxGeometry(1.6, 0.6, 2, 3, 2, 3), 0.1, 2, seed + 1), this.mat.rust);
+    cabin.position.set(0, 1.2, -0.2);
+    g.add(cabin);
+    for (const sz of [-1, 1]) {
+      const win = new THREE.Mesh(new THREE.BoxGeometry(1.45, 0.42, 0.05), this.mat.void);
+      win.position.set(0, 1.22, -0.2 + sz * 1.0);
+      win.rotation.x = sz * 0.25;
+      g.add(win);
+    }
+    for (const [x, z] of [[-0.9, 1.4], [0.9, 1.4], [-0.9, -1.4]]) {
+      const w = new THREE.Mesh(new THREE.TorusGeometry(0.3, 0.12, 6, 12), this.mat.rubber);
+      w.rotation.y = Math.PI / 2;
+      w.position.set(x, 0.32, z);
+      g.add(w);
+    }
+    g.rotation.z = 0.05;
+    return g;
+  }
+
+  /** Полуразрушенное бетонное здание: стены с проломами и неровным верхом. */
+  ruin(w: number, d: number, h: number, seed: number): THREE.Group {
+    const g = new THREE.Group();
+    const rnd = mulberry32(seed);
+    const wall = (len: number, along: 'x' | 'z', ox: number, oz: number) => {
+      const n = Math.max(2, Math.round(len / 1.5));
+      const seg = len / n;
+      for (let i = 0; i < n; i++) {
+        const isDoor = along === 'x' && oz > 0 && i === Math.floor(n / 2);
+        const hh = isDoor ? 0 : h * (0.45 + rnd() * 0.55);
+        if (hh < 0.5) continue;
+        const geo = jitter(new THREE.BoxGeometry(along === 'x' ? seg : 0.35, hh, along === 'x' ? 0.35 : seg, 2, 3, 2), 0.12, 1.3, seed + i);
+        const m = new THREE.Mesh(geo, this.mat.concrete);
+        const off = -len / 2 + seg * (i + 0.5);
+        m.position.set(along === 'x' ? ox + off : ox, hh / 2, along === 'x' ? oz : oz + off);
+        g.add(m);
+        // Тёмные проёмы окон.
+        if (hh > h * 0.7 && rnd() < 0.6) {
+          const win = new THREE.Mesh(new THREE.BoxGeometry(along === 'x' ? 0.6 : 0.4, 0.6, along === 'x' ? 0.4 : 0.6), this.mat.void);
+          win.position.set(m.position.x, hh * 0.65, m.position.z);
+          g.add(win);
+        }
+      }
+    };
+    wall(w, 'x', 0, d / 2);
+    wall(w, 'x', 0, -d / 2);
+    wall(d, 'z', w / 2, 0);
+    wall(d, 'z', -w / 2, 0);
+    // Обломки у стен.
+    for (let i = 0; i < 5; i++) {
+      const chunk = new THREE.Mesh(jitter(new THREE.BoxGeometry(0.6, 0.4, 0.5), 0.15, 2, seed + 50 + i), this.mat.concrete);
+      chunk.position.set((rnd() - 0.5) * (w + 2), 0.15, (rnd() > 0.5 ? 1 : -1) * (d / 2 + 0.6 + rnd()));
+      chunk.rotation.set(rnd(), rnd() * 3, rnd());
+      g.add(chunk);
+    }
+    return g;
+  }
+
+  /** Блокирует навигацию по периметру прямоугольника (стены), оставляя проём двери в +Z. */
+  blockWalls(x: number, z: number, w: number, d: number, rotY: number, door = 1.4) {
+    const cos = Math.cos(rotY);
+    const sin = Math.sin(rotY);
+    const pt = (lx: number, lz: number): [number, number] => [x + lx * cos + lz * sin, z - lx * sin + lz * cos];
+    const seg = (ax: number, az: number, bx: number, bz: number) => {
+      const n = Math.ceil(Math.hypot(bx - ax, bz - az) * 2);
+      for (let i = 0; i <= n; i++) {
+        const lx = ax + ((bx - ax) * i) / n;
+        const lz = az + ((bz - az) * i) / n;
+        if (az === d / 2 && bz === d / 2 && Math.abs(lx) < door / 2) continue;
+        const [px, pz] = pt(lx, lz);
+        this.nav.blockCircle(px, pz, 0.45);
+      }
+    };
+    seg(-w / 2, -d / 2, w / 2, -d / 2);
+    seg(-w / 2, d / 2, w / 2, d / 2);
+    seg(-w / 2, -d / 2, -w / 2, d / 2);
+    seg(w / 2, -d / 2, w / 2, d / 2);
+  }
+
+  totem(): THREE.Group {
     const g = new THREE.Group();
     const mats = [this.mat.darkWood, this.mat.paintRed, this.mat.wood, this.mat.paintBlue];
     let y = 0;
@@ -178,14 +422,17 @@ export class World {
     return g;
   }
 
-  private addFlame(pos: THREE.Vector3, intensity: number, scale: number) {
-    const light = new THREE.PointLight(0xff8a3a, intensity, 16, 1.6);
-    light.position.copy(pos).add(new THREE.Vector3(0, 0.6, 0));
-    this.group.add(light);
-    this.flames.push({ pos, light, base: intensity, scale });
+  addFlame(pos: THREE.Vector3, intensity: number, scale: number, light = true) {
+    let l: THREE.PointLight | null = null;
+    if (light) {
+      l = new THREE.PointLight(0xff8a3a, intensity, 16, 1.6);
+      l.position.copy(pos).add(new THREE.Vector3(0, 0.6, 0));
+      this.group.add(l);
+    }
+    this.flames.push({ pos, light: l, base: intensity, scale });
   }
 
-  private torch(x: number, z: number) {
+  torch(x: number, z: number) {
     const g = new THREE.Group();
     const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.08, 2.2, 6), this.mat.darkWood);
     pole.position.y = 1.1;
@@ -198,272 +445,92 @@ export class World {
     this.nav.blockCircle(x, z, 0.4);
   }
 
-  private buildVillage() {
-    const { x: vx, z: vz } = VILLAGE;
-    const huts = [
-      { x: 0, z: -17, r: 4.2, h: 3.0 },
-      { x: -14, z: -8, r: 2.8, h: 2.4 },
-      { x: 14, z: -9, r: 2.8, h: 2.4 },
-      { x: -17, z: 7, r: 3.0, h: 2.5 },
-      { x: 16, z: 9, r: 2.6, h: 2.3 },
-      { x: -7, z: 16, r: 2.5, h: 2.3 },
-      { x: 8, z: 17, r: 2.7, h: 2.4 },
-    ];
-    huts.forEach((hd, i) => {
-      const x = vx + hd.x;
-      const z = vz + hd.z;
-      const hut = this.hut(hd.r, hd.h, i * 13 + 3);
-      this.place(hut, x, z, Math.atan2(vx - x, vz - z), 0.15);
-      this.nav.blockCircle(x, z, hd.r + 0.4);
-      // Горшки у стен.
-      for (let k = 0; k < 2; k++) {
-        const a = Math.atan2(vx - x, vz - z) + (k ? 0.9 : -0.9);
-        const p = this.pot();
-        p.scale.setScalar(0.8 + this.rnd() * 0.6);
-        this.place(p, x + Math.sin(a) * (hd.r + 0.5), z + Math.cos(a) * (hd.r + 0.5), this.rnd() * 6, 0.02);
-      }
-    });
-
-    // Костёр в центре.
-    const fire = new THREE.Group();
-    for (let i = 0; i < 10; i++) {
-      const a = (i / 10) * Math.PI * 2;
-      const s = new THREE.Mesh(jitter(new THREE.IcosahedronGeometry(0.22, 1), 0.12, 3, i), this.mat.stone);
-      s.position.set(Math.cos(a) * 0.85, 0.1, Math.sin(a) * 0.85);
-      fire.add(s);
-    }
-    for (let i = 0; i < 4; i++) {
-      const log = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.11, 1.3, 6), this.mat.darkWood);
-      log.rotation.z = Math.PI / 2 - 0.5;
-      log.rotation.y = (i / 4) * Math.PI * 2;
-      log.position.y = 0.3;
-      const holder = new THREE.Group();
-      holder.add(log);
-      holder.rotation.y = (i / 4) * Math.PI;
-      fire.add(holder);
-    }
-    this.place(fire, vx, vz, 0, 0);
-    this.addFlame(new THREE.Vector3(vx, this.y(vx, vz) + 0.3, vz), 30, 1);
-    this.nav.blockCircle(vx, vz, 1.3);
-    // Брёвна-скамьи вокруг костра.
-    for (let i = 0; i < 4; i++) {
-      const a = (i / 4) * Math.PI * 2 + 0.4;
-      const bench = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.24, 2.2, 8), this.mat.wood);
-      bench.rotation.z = Math.PI / 2;
-      const holder = new THREE.Group();
-      holder.add(bench);
-      const bx = vx + Math.cos(a) * 3.6;
-      const bz = vz + Math.sin(a) * 3.6;
-      this.place(holder, bx, bz, -a + Math.PI / 2, -0.15);
-      this.nav.blockRect(bx, bz, 1.0, 0.3, -a + Math.PI / 2);
-    }
-
-    // Частокол с проходами на восток (гнездо), север (храм), северо-запад (пёс) и юг.
-    const gaps = [0, -Math.PI / 2, Math.atan2(DOG_SPOT.z, DOG_SPOT.x), Math.PI / 2];
-    const R = 26;
-    const postGeo = new THREE.CylinderGeometry(0.09, 0.12, 1, 6);
-    const postsMatrices: THREE.Matrix4[] = [];
-    const steps = Math.floor((Math.PI * 2 * R) / 0.55);
-    for (let s = 0; s < steps; s++) {
-      const a = (s / steps) * Math.PI * 2 - Math.PI;
-      if (gaps.some((g) => Math.abs(Math.atan2(Math.sin(a - g), Math.cos(a - g))) < 0.13)) continue;
-      const x = vx + Math.cos(a) * R;
-      const z = vz + Math.sin(a) * R;
-      const h = 1.6 + this.rnd() * 0.7;
-      const m = new THREE.Matrix4().compose(
-        new THREE.Vector3(x, this.y(x, z) + h / 2 - 0.15, z),
-        new THREE.Quaternion().setFromEuler(new THREE.Euler((this.rnd() - 0.5) * 0.12, 0, (this.rnd() - 0.5) * 0.12)),
-        new THREE.Vector3(1, h, 1),
-      );
-      postsMatrices.push(m);
-      this.nav.blockCircle(x, z, 0.5);
-    }
-    const posts = new THREE.InstancedMesh(postGeo, this.mat.wood, postsMatrices.length);
-    postsMatrices.forEach((m, i) => posts.setMatrixAt(i, m));
-    posts.castShadow = posts.receiveShadow = true;
-    this.group.add(posts);
-    // Тотемы и факелы у проходов.
-    for (const g of gaps) {
-      for (const side of [-1, 1]) {
-        const a = g + side * 0.19;
-        const tx = vx + Math.cos(a) * (R + 0.2);
-        const tz = vz + Math.sin(a) * (R + 0.2);
-        this.place(this.totem(), tx, tz, -a + Math.PI / 2, 0.05);
-        this.nav.blockCircle(tx, tz, 0.6);
-      }
-      this.torch(vx + Math.cos(g + 0.3) * (R - 1.2), vz + Math.sin(g + 0.3) * (R - 1.2));
-    }
-
-    // Загон для брамінов.
-    const pen = new THREE.Group();
-    const pw = 4.5;
-    const pd = 4.5;
-    const rail = (ax: number, az: number, bx: number, bz: number) => {
-      for (const y of [0.55, 1.05]) {
-        pen.add(new THREE.Mesh(cylinderBetween(new THREE.Vector3(ax, y, az), new THREE.Vector3(bx, y, bz), 0.05, 0.05), this.mat.wood));
-      }
-      const n = Math.ceil(Math.hypot(bx - ax, bz - az) / 1.5);
-      for (let i = 0; i <= n; i++) {
-        const p = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.08, 1.4, 6), this.mat.darkWood);
-        p.position.set(ax + ((bx - ax) * i) / n, 0.6, az + ((bz - az) * i) / n);
-        pen.add(p);
-      }
-    };
-    rail(-pw, -pd, pw, -pd);
-    rail(pw, -pd, pw, pd);
-    rail(pw, pd, -pw, pd);
-    rail(-pw, pd, -pw, -pd);
-    const trough = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.35, 0.5), this.mat.darkWood);
-    trough.position.set(0, 0.18, -pd + 0.6);
-    pen.add(trough);
-    this.place(pen, PEN.x, PEN.z, 0, 0.1);
-    for (const [ax, az, bx, bz] of [[-pw, -pd, pw, -pd], [pw, -pd, pw, pd], [pw, pd, -pw, pd], [-pw, pd, -pw, -pd]]) {
-      const n = Math.ceil(Math.hypot(bx - ax, bz - az) * 2);
-      for (let i = 0; i <= n; i++) {
-        this.nav.blockCircle(PEN.x + ax + ((bx - ax) * i) / n, PEN.z + az + ((bz - az) * i) / n, 0.5);
-      }
-    }
-
-    // Огород шамана.
-    for (let row = 0; row < 3; row++) {
-      for (let k = 0; k < 5; k++) {
-        const bush = new THREE.Mesh(jitter(new THREE.IcosahedronGeometry(0.3, 1), 0.15, 3, row * 5 + k), this.mat.plant);
-        bush.scale.set(1, 0.7 + this.rnd() * 0.4, 1);
-        this.place(bush, 9 + k * 0.9, -1.5 + row * 1.1, this.rnd() * 6, -0.15);
-      }
-    }
-  }
-
-  // ─── Храм Испытаний ───────────────────────────────────────────────────────
-
-  private buildTemple() {
-    const { x, z } = TEMPLE;
-    const g = new THREE.Group();
-    const s = this.mat.stone;
-    const box = (w: number, h: number, d: number, px: number, py: number, pz: number, m: THREE.Material = s, j = 0.08) => {
-      const mesh = new THREE.Mesh(jitter(new THREE.BoxGeometry(w, h, d, 6, 4, 6), j, 1.2, Math.floor(px * 7 + py * 3)), m);
-      mesh.position.set(px, py, pz);
-      g.add(mesh);
-      return mesh;
-    };
-    box(17, 0.8, 13, 0, 0.4, 0);
-    box(13, 6, 8, 0, 3.8, -1.5);
-    box(10, 1.4, 6.5, 0, 7.5, -1.5);
-    box(6, 1.2, 4.5, 0, 8.8, -1.5);
-    box(3.2, 3.8, 0.6, 0, 2.7, 2.35, this.mat.void, 0);
-    // Колонны и антаблемент.
-    for (const cx of [-5.4, -3.2, 3.2, 5.4]) {
-      const col = new THREE.Mesh(jitter(new THREE.CylinderGeometry(0.45, 0.55, 5.2, 12, 4), 0.07, 2, cx * 10), s);
-      col.position.set(cx, 3.4, 4.6);
-      g.add(col);
-    }
-    box(13.2, 0.9, 1.6, 0, 6.3, 4.6);
-    // Ступени.
-    for (let i = 0; i < 3; i++) box(6 - i * 0.6, 0.3, 1, 0, 0.15 + i * 0.3 - 0.3, 7 - i * 0.8, s, 0.03);
-    // Обломки.
-    const piece = new THREE.Mesh(jitter(new THREE.CylinderGeometry(0.5, 0.55, 1.6, 12), 0.1, 2, 4), s);
-    piece.rotation.z = Math.PI / 2;
-    piece.position.set(7.5, 0.5, 6);
-    g.add(piece);
-    this.place(g, x, z, 0, 0.35);
-    this.nav.blockRect(x, z - 0.5, 8.6, 6.2);
-    this.interactables.push({
-      id: 'temple',
-      name: 'Храм Испытаний',
-      object: g,
-      approach: new THREE.Vector3(x, 0, z + 9),
-    });
-  }
-
-  // ─── Гнездо гекконов и место, где прячется пёс ────────────────────────────
-
-  private boulder(scale: THREE.Vector3, seed: number): THREE.Mesh {
+  boulder(scale: THREE.Vector3, seed: number): THREE.Mesh {
     const m = new THREE.Mesh(jitter(new THREE.IcosahedronGeometry(1, 2), 0.6, 0.9, seed), this.mat.rock);
     m.scale.copy(scale);
     return m;
   }
 
-  private buildNest() {
-    const { x, z } = NEST;
-    for (let i = 0; i < 9; i++) {
-      const a = (i / 9) * Math.PI * 2 + 0.3;
-      if (Math.abs(Math.atan2(Math.sin(a - Math.PI), Math.cos(a - Math.PI))) < 0.5) continue; // вход с запада
-      const r = 8 + this.rnd() * 1.5;
-      const s = 1.2 + this.rnd() * 1.2;
-      const bx = x + Math.cos(a) * r;
-      const bz = z + Math.sin(a) * r;
-      this.place(this.boulder(new THREE.Vector3(s, s * 0.8, s), i + 40), bx, bz, this.rnd() * 6, s * 0.3);
-      this.nav.blockCircle(bx, bz, s * 0.9);
+  /** Изгородь из столбов и жердей по ломаной; блокирует проход. */
+  fence(points: [number, number][], closed = false) {
+    const g = new THREE.Group();
+    const pts = closed ? [...points, points[0]] : points;
+    for (let k = 0; k < pts.length - 1; k++) {
+      const [ax, az] = pts[k];
+      const [bx, bz] = pts[k + 1];
+      const n = Math.ceil(Math.hypot(bx - ax, bz - az) / 1.5);
+      for (let i = 0; i <= n; i++) {
+        const px = ax + ((bx - ax) * i) / n;
+        const pz = az + ((bz - az) * i) / n;
+        const post = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.08, 1.4, 6), this.mat.darkWood);
+        post.position.set(px, this.y(px, pz) + 0.6, pz);
+        g.add(post);
+      }
+      for (const yy of [0.55, 1.05]) {
+        g.add(new THREE.Mesh(cylinderBetween(
+          new THREE.Vector3(ax, this.y(ax, az) + yy, az),
+          new THREE.Vector3(bx, this.y(bx, bz) + yy, bz), 0.05, 0.05), this.mat.wood));
+      }
+      const m = Math.ceil(Math.hypot(bx - ax, bz - az) * 2);
+      for (let i = 0; i <= m; i++) this.nav.blockCircle(ax + ((bx - ax) * i) / m, az + ((bz - az) * i) / m, 0.5);
     }
-    // Кладка яиц и кости.
-    for (let i = 0; i < 7; i++) {
-      const egg = new THREE.Mesh(new THREE.SphereGeometry(0.16, 10, 8), this.mat.egg);
-      egg.scale.set(1, 1.35, 1);
-      this.place(egg, x + 2 + (this.rnd() - 0.5) * 1.2, z - 1 + (this.rnd() - 0.5) * 1.2, 0, -0.12);
-    }
-    for (let i = 0; i < 8; i++) {
-      const bone = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.05, 0.6 + this.rnd() * 0.4, 5), this.mat.bone);
-      bone.rotation.z = Math.PI / 2;
-      const holder = new THREE.Group();
-      holder.add(bone);
-      this.place(holder, x + (this.rnd() - 0.5) * 9, z + (this.rnd() - 0.5) * 9, this.rnd() * 6, -0.03);
-    }
-    const skull = new THREE.Group();
-    const cranium = new THREE.Mesh(new THREE.SphereGeometry(0.4, 12, 10), this.mat.bone);
-    cranium.scale.set(1, 0.8, 1.4);
-    skull.add(cranium);
-    for (const sx of [-1, 1]) {
-      const horn = new THREE.Mesh(new THREE.ConeGeometry(0.08, 0.8, 8), this.mat.bone);
-      horn.position.set(sx * 0.45, 0.2, 0);
-      horn.rotation.z = -sx * 1.1;
-      skull.add(horn);
-    }
-    this.place(skull, x - 3, z + 3, 0.7, -0.1);
+    g.traverse((o) => ((o as THREE.Mesh).isMesh ? (o.castShadow = o.receiveShadow = true) : null));
+    this.group.add(g);
   }
 
-  private buildDogSpot() {
-    const { x, z } = DOG_SPOT;
-    for (let i = 0; i < 5; i++) {
-      const a = (i / 5) * Math.PI * 2;
-      const s = 1 + this.rnd();
-      const bx = x + Math.cos(a) * 5;
-      const bz = z + Math.sin(a) * 5;
-      if (i === 1) continue;
-      this.place(this.boulder(new THREE.Vector3(s, s * 0.7, s * 1.2), i + 70), bx, bz, this.rnd() * 6, s * 0.25);
-      this.nav.blockCircle(bx, bz, s * 0.9);
+  interactable(it: Interactable) { this.interactables.push(it); }
+
+  // ─── Выходы на карту мира ─────────────────────────────────────────────────
+
+  private buildExits(exits: Circle[]) {
+    for (const e of exits) {
+      const seg = 32;
+      const geo = new THREE.PlaneGeometry(e.r * 2, e.r * 2, seg, seg).rotateX(-Math.PI / 2);
+      const pos = geo.attributes.position as THREE.BufferAttribute;
+      for (let i = 0; i < pos.count; i++) {
+        pos.setY(i, this.y(e.x + pos.getX(i), e.z + pos.getZ(i)) + 0.08);
+      }
+      const mat = exitMaterial();
+      this.exitMats.push(mat);
+      const m = new THREE.Mesh(geo, mat);
+      m.position.set(e.x, 0, e.z);
+      m.renderOrder = 4;
+      this.group.add(m);
+      // Указатель на столбе.
+      const sign = new THREE.Group();
+      const post = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.07, 2.2, 6), this.mat.darkWood);
+      post.position.y = 1.1;
+      sign.add(post);
+      const board = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.35, 0.06), this.mat.wood);
+      board.position.set(0.4, 1.9, 0);
+      sign.add(board);
+      const ang = Math.atan2(-e.x, -e.z);
+      this.place(sign, e.x + Math.sin(ang) * (e.r + 0.8) + Math.cos(ang) * 1.5, e.z + Math.cos(ang) * (e.r + 0.8) - Math.sin(ang) * 1.5, ang, 0.05);
     }
   }
 
   // ─── Рассыпка окружения ───────────────────────────────────────────────────
 
-  private isReserved(x: number, z: number, pad = 0): boolean {
-    const zones = [
-      { x: VILLAGE.x, z: VILLAGE.z, r: 29 },
-      { x: TEMPLE.x, z: TEMPLE.z, r: 13 },
-      { x: NEST.x, z: NEST.z, r: 10 },
-      { x: DOG_SPOT.x, z: DOG_SPOT.z, r: 6 },
-    ];
-    return zones.some((zn) => Math.hypot(x - zn.x, z - zn.z) < zn.r + pad);
+  private isReserved(x: number, z: number, reserved: Circle[], pad = 0): boolean {
+    return reserved.some((zn) => Math.hypot(x - zn.x, z - zn.z) < zn.r + pad) || distToPaths(x, z) < 2.2;
   }
 
-  private scatterRocks() {
+  private scatterRocks(count: number, reserved: Circle[]) {
     const geos = [0, 1, 2].map((i) => jitter(new THREE.IcosahedronGeometry(1, 2), 0.7, 0.8, 100 + i));
     for (let gi = 0; gi < geos.length; gi++) {
       const matrices: THREE.Matrix4[] = [];
-      for (let n = 0; n < 140; n++) {
+      for (let n = 0; n < count / 3; n++) {
         const x = (this.rnd() - 0.5) * (WORLD_SIZE - 10);
         const z = (this.rnd() - 0.5) * (WORLD_SIZE - 10);
         const big = this.rnd() < 0.22;
-        if (this.isReserved(x, z, big ? 3 : 0)) continue;
+        if (this.isReserved(x, z, reserved, big ? 3 : 0)) continue;
         const s = big ? 1.1 + this.rnd() * 1.6 : 0.15 + this.rnd() * 0.4;
         const sc = new THREE.Vector3(s * (0.8 + this.rnd() * 0.5), s * (0.5 + this.rnd() * 0.4), s * (0.8 + this.rnd() * 0.5));
-        matrices.push(
-          new THREE.Matrix4().compose(
-            new THREE.Vector3(x, this.y(x, z) - sc.y * 0.25, z),
-            new THREE.Quaternion().setFromEuler(new THREE.Euler(this.rnd() * 0.3, this.rnd() * 6.28, this.rnd() * 0.3)),
-            sc,
-          ),
-        );
+        matrices.push(new THREE.Matrix4().compose(
+          new THREE.Vector3(x, this.y(x, z) - sc.y * 0.25, z),
+          new THREE.Quaternion().setFromEuler(new THREE.Euler(this.rnd() * 0.3, this.rnd() * 6.28, this.rnd() * 0.3)),
+          sc,
+        ));
         if (big) this.nav.blockCircle(x, z, Math.max(sc.x, sc.z) * 0.85);
       }
       const im = new THREE.InstancedMesh(geos[gi], this.mat.rock, matrices.length);
@@ -473,7 +540,7 @@ export class World {
     }
   }
 
-  private deadTreeGeometry(seed: number): THREE.BufferGeometry {
+  deadTreeGeometry(seed: number): THREE.BufferGeometry {
     const rnd = mulberry32(seed);
     const parts: THREE.BufferGeometry[] = [];
     const grow = (from: THREE.Vector3, dir: THREE.Vector3, len: number, r: number, depth: number) => {
@@ -490,13 +557,20 @@ export class World {
     return mergeGeometries(parts.map((p) => p.toNonIndexed()))!;
   }
 
-  private scatterTrees() {
+  tree(x: number, z: number, scale = 1.3, variant = 0) {
+    const t = new THREE.Mesh(this.deadTreeGeometry(variant * 31 + 31), this.mat.darkWood);
+    t.scale.setScalar(scale);
+    this.place(t, x, z, x, 0);
+    this.nav.blockCircle(x, z, 0.5);
+  }
+
+  private scatterTrees(count: number, reserved: Circle[]) {
     const geos = [1, 2, 3].map((s) => this.deadTreeGeometry(s * 31));
     let placed = 0;
-    for (let n = 0; n < 200 && placed < 34; n++) {
+    for (let n = 0; n < count * 6 && placed < count; n++) {
       const x = (this.rnd() - 0.5) * (WORLD_SIZE - 16);
       const z = (this.rnd() - 0.5) * (WORLD_SIZE - 16);
-      if (this.isReserved(x, z, 2)) continue;
+      if (this.isReserved(x, z, reserved, 2)) continue;
       const [i, j] = this.nav.cellOf(x, z);
       if (!this.nav.isWalkable(i, j)) continue;
       const tree = new THREE.Mesh(geos[placed % 3], this.mat.darkWood);
@@ -505,17 +579,9 @@ export class World {
       this.nav.blockCircle(x, z, 0.5);
       placed++;
     }
-    // Пара деревьев в деревне для уюта.
-    for (const [x, z] of [[-9, -12], [12, 3], [-4, 22]]) {
-      const tree = new THREE.Mesh(geos[0], this.mat.darkWood);
-      tree.scale.setScalar(1.3);
-      this.place(tree, x, z, x, 0);
-      this.nav.blockCircle(x, z, 0.5);
-    }
   }
 
-  private scatterGrass() {
-    // Пучок сухой травы: несколько изогнутых травинок.
+  private scatterGrass(count: number, reserved: Circle[]) {
     const blades: number[] = [];
     const normals: number[] = [];
     const rnd = mulberry32(77);
@@ -549,25 +615,23 @@ export class World {
     };
     const matrices: THREE.Matrix4[] = [];
     const colors: THREE.Color[] = [];
-    for (let n = 0; n < 4200; n++) {
+    for (let n = 0; n < count; n++) {
       const x = (this.rnd() - 0.5) * (WORLD_SIZE - 12);
       const z = (this.rnd() - 0.5) * (WORLD_SIZE - 12);
-      if (Math.hypot(x - VILLAGE.x, z - VILLAGE.z) < 7) continue;
-      // Трава растёт пятнами.
+      if (reserved.some((zn) => Math.hypot(x - zn.x, z - zn.z) < zn.r * 0.3)) continue;
       if (fbm(x * 0.07, z * 0.07, 3, 400) < 0.45) continue;
       const [i, j] = this.nav.cellOf(x, z);
       if (!this.nav.inBounds(i, j) || this.nav.blocked[this.nav.idx(i, j)]) continue;
       const s = 0.7 + this.rnd() * 0.9;
-      matrices.push(
-        new THREE.Matrix4().compose(
-          new THREE.Vector3(x, this.y(x, z) - 0.03, z),
-          new THREE.Quaternion().setFromEuler(new THREE.Euler(0, this.rnd() * 6.28, 0)),
-          new THREE.Vector3(s, s * (0.8 + this.rnd() * 0.5), s),
-        ),
-      );
+      matrices.push(new THREE.Matrix4().compose(
+        new THREE.Vector3(x, this.y(x, z) - 0.03, z),
+        new THREE.Quaternion().setFromEuler(new THREE.Euler(0, this.rnd() * 6.28, 0)),
+        new THREE.Vector3(s, s * (0.8 + this.rnd() * 0.5), s),
+      ));
       colors.push(new THREE.Color().setHSL(0.1 + this.rnd() * 0.04, 0.35 + this.rnd() * 0.2, 0.42 + this.rnd() * 0.15));
     }
-    const im = new THREE.InstancedMesh(geo, mat, matrices.length);
+    const im = new THREE.InstancedMesh(geo, mat, Math.max(1, matrices.length));
+    im.count = matrices.length;
     matrices.forEach((m, i) => {
       im.setMatrixAt(i, m);
       im.setColorAt(i, colors[i]);
@@ -580,11 +644,14 @@ export class World {
 
   update(dt: number, time: number, focus: THREE.Vector3) {
     this.timeUniform.value = time;
+    for (const m of this.exitMats) m.uniforms.uTime.value = time;
     this.fireAcc += dt;
     const c = new THREE.Color();
     while (this.fireAcc > 1 / 60) {
       this.fireAcc -= 1 / 60;
       for (const f of this.flames) {
+        // Далёкие огни не тратят частицы.
+        if (Math.abs(f.pos.x - focus.x) > 45 || Math.abs(f.pos.z - focus.z) > 45) continue;
         const s = f.scale;
         for (let k = 0; k < Math.ceil(2 * s); k++) {
           c.setRGB(4 + Math.random() * 2, 1.4 + Math.random() * 0.8, 0.3);
@@ -609,9 +676,8 @@ export class World {
             color: c,
           });
         }
-        f.light.intensity = f.base * (0.8 + Math.random() * 0.35);
+        if (f.light) f.light.intensity = f.base * (0.8 + Math.random() * 0.35);
       }
-      // Пыль, несомая ветром вокруг камеры.
       if (Math.random() < 0.5) {
         c.setRGB(0.85, 0.7, 0.55);
         this.dust.emit({

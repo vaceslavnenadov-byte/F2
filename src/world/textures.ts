@@ -89,7 +89,11 @@ export interface DetailTextures {
   woodMap: THREE.Texture;
 }
 
+let cache: DetailTextures | null = null;
+
+/** Текстуры генерируются один раз и переиспользуются всеми локациями. */
 export function createTextures(): DetailTextures {
+  if (cache) return cache;
   const size = 256;
 
   // Песок: мелкое зерно + крупные пятна.
@@ -152,5 +156,6 @@ export function createTextures(): DetailTextures {
     true,
   );
 
-  return { sandMap, sandNormal, rockNormal, thatchMap, woodMap };
+  cache = { sandMap, sandNormal, rockNormal, thatchMap, woodMap };
+  return cache;
 }

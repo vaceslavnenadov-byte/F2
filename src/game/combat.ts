@@ -20,7 +20,11 @@ export class Combat {
   constructor(private game: Game, private playerFirst: boolean, target?: Actor) {
     const p = game.player;
     // В бой вступают только те, кто рядом; остальные подтягиваются, когда игрок подойдёт к ним.
-    this.participants = [p, ...game.actors.filter((a) => a.faction === 'hostile' && !a.dead && a.distanceTo(p) < a.detectRadius + 3)];
+    this.participants = [
+      p,
+      ...game.party,
+      ...game.actors.filter((a) => a.faction === 'hostile' && !a.dead && a.distanceTo(p) < a.detectRadius + 3),
+    ];
     if (target && !this.participants.includes(target)) this.participants.push(target);
   }
 
@@ -46,7 +50,12 @@ export class Combat {
 
   private hostilesLeft(): Actor[] {
     const p = this.game.player;
-    return this.participants.filter((a) => a !== p && !a.dead && a.distanceTo(p) < 24);
+    return this.participants.filter((a) => a.faction === 'hostile' && !a.dead && a.distanceTo(p) < 24);
+  }
+
+  /** Союзники игрока в бою (сам игрок и живые компаньоны). */
+  private allies(): Actor[] {
+    return this.participants.filter((a) => (a === this.game.player || a.faction === 'companion') && !a.dead);
   }
 
   async run() {
@@ -230,6 +239,7 @@ export class Combat {
     const roll = randInt(1, 100);
     const isPlayer = attacker === g.player;
     const tName = target === g.player ? 'вас' : target.name.toLowerCase();
+    const ally = attacker === g.player || attacker.faction === 'companion';
     if (roll > chance) {
       g.ui.floatText(target.pos.clone().setY(target.pos.y + target.rig.height + 0.3), 'Промах', '#e8dcc0');
       g.ui.log(isPlayer ? `Вы промахнулись по цели: ${tName}.` : `${attacker.name} промахивается.`);
@@ -240,39 +250,46 @@ export class Combat {
     const crit = randInt(1, 100) <= (isPlayer ? g.char.critChance : 3);
     if (crit) dmg *= 2;
     g.damage(target, dmg, attacker);
+    const critText = crit ? 'Критический удар! ' : '';
     const msg = isPlayer
-      ? `${crit ? 'Критический удар! ' : ''}Вы поразили цель (${tName}): ${dmg} ед. урона.`
-      : `${crit ? 'Критический удар! ' : ''}${attacker.name} наносит вам ${dmg} ед. урона.`;
-    g.ui.log(msg, isPlayer ? (crit ? 'good' : '') : 'bad');
+      ? `${critText}Вы поразили цель (${tName}): ${dmg} ед. урона.`
+      : target === g.player
+        ? `${critText}${attacker.name} наносит вам ${dmg} ед. урона.`
+        : `${critText}${attacker.name} бьёт цель (${tName}): ${dmg} ед. урона.`;
+    g.ui.log(msg, ally ? (crit ? 'good' : '') : 'bad');
     await wait(0.5);
   }
 
   // ─── ИИ ──────────────────────────────────────────────────────────────────
 
+  /** Ход ИИ: компаньоны бьют ближайшего врага, враги — ближайшего из отряда игрока. */
   private async aiTurn(a: Actor) {
     const g = this.game;
-    const p = g.player;
-    const w = a.attack!;
+    const w = a.attack;
     await wait(0.3);
+    if (!w) return;
+    const friendly = a.faction === 'companion';
     let guard = 0;
-    while (a.ap > 0 && !p.dead && !a.dead && guard++ < 10) {
-      const d = a.distanceTo(p);
-      if (d <= w.range + 0.01) {
+    while (a.ap > 0 && !g.player.dead && !a.dead && guard++ < 10) {
+      const targets = friendly ? this.hostilesLeft() : this.allies();
+      if (!targets.length) break;
+      const t = targets.reduce((best, x) => (a.distanceTo(x) < a.distanceTo(best) ? x : best));
+      if (a.distanceTo(t) <= w.range + 0.01) {
         if (a.ap < w.ap) break;
         a.ap -= w.ap;
-        await this.strike(a, p, w);
+        await this.strike(a, t, w);
         continue;
       }
-      // Раненый зверь отступает к гнезду вместо атаки.
-      if (a.hp < a.maxHp * 0.25 && Math.random() < 0.35) {
+      // Раненый зверь отступает вместо атаки.
+      if (!friendly && a.hp < a.maxHp * 0.25 && Math.random() < 0.35) {
         g.ui.log(`${a.name} в панике пятится.`);
         const nav = g.nav;
-        const away = a.pos.clone().sub(p.pos).setY(0).normalize().multiplyScalar(a.ap).add(a.pos);
+        const away = a.pos.clone().sub(t.pos).setY(0).normalize().multiplyScalar(a.ap).add(a.pos);
         const path = nav.findPath(a.cell(nav), nav.cellOf(away.x, away.z), { occupied: this.occupied(a), diagCost: COMBAT_DIAG });
         if (path) await this.moveSteps(a, path.slice(0, a.ap));
         break;
       }
-      const path = this.approachPath(a, p, w.range);
+      const path = this.approachPath(a, t, w.range);
       if (!path || path.length === 0) break;
       const steps = path.slice(0, a.ap);
       await this.moveSteps(a, steps);
