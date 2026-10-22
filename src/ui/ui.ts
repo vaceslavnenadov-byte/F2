@@ -33,6 +33,10 @@ export class UI {
     });
     $('btn-end').addEventListener('click', () => game.endTurn());
     $('btn-combat').addEventListener('click', () => game.requestCombat());
+    $('btn-aim').addEventListener('click', () => game.toggleAim());
+    window.addEventListener('keydown', (e) => {
+      if (e.code === 'Escape') this.hideAimMenu();
+    });
     $('weapon-slot').addEventListener('click', () => this.togglePanel('inv'));
   }
 
@@ -58,7 +62,7 @@ export class UI {
     const hp = $('hp');
     hp.textContent = String(Math.max(0, g.char.hp)).padStart(3, '0');
     hp.classList.toggle('ok', g.char.hp > g.char.maxHp * 0.5);
-    $('ac').textContent = String(g.char.ac).padStart(3, '0');
+    $('ac').textContent = String(g.playerAC).padStart(3, '0');
     const w = g.inv.weapon;
     const ammo = w.ammo ? ` · ${g.inv.count(w.ammo)} пт.` : '';
     $('weapon-slot').querySelector('.w-name')!.textContent = g.inv.weaponName;
@@ -79,6 +83,8 @@ export class UI {
     const playerTurn = inCombat && g.isPlayerTurn;
     ($('btn-end') as HTMLButtonElement).disabled = !playerTurn;
     ($('btn-combat') as HTMLButtonElement).disabled = inCombat;
+    ($('btn-aim') as HTMLButtonElement).disabled = !playerTurn;
+    $('btn-aim').classList.toggle('on', g.aimMode);
     $('clock').textContent = g.clockText();
     const ti = $('turn-indicator');
     ti.className = inCombat ? (playerTurn ? 'player' : 'enemy') : '';
@@ -134,6 +140,27 @@ export class UI {
       if (this.bannerTimer <= 0) $('banner').classList.remove('show');
     }
   }
+
+  // ─── Прицельная атака ────────────────────────────────────────────────────
+
+  showAimMenu(x: number, y: number, target: string, parts: { label: string; chance: number; ap: number; enabled: boolean }[], onPick: (i: number) => void) {
+    const m = $('aim');
+    m.innerHTML = `<div class="aim-title">${esc(target)}: куда бить?</div>` +
+      parts.map((p, i) => `<div class="aim-opt ${p.enabled ? '' : 'off'}" data-i="${i}"><span>${esc(p.label)}</span><span>${p.chance}% · ${p.ap} ОД</span></div>`).join('');
+    m.classList.remove('hidden');
+    m.style.left = Math.min(x + 12, window.innerWidth - 260) + 'px';
+    m.style.top = Math.min(y - 20, window.innerHeight - 330) + 'px';
+    m.querySelectorAll<HTMLElement>('.aim-opt').forEach((el) =>
+      el.addEventListener('click', () => {
+        const i = Number(el.dataset.i);
+        if (!parts[i].enabled) return;
+        this.hideAimMenu();
+        onPick(i);
+      }),
+    );
+  }
+
+  hideAimMenu() { $('aim').classList.add('hidden'); }
 
   // ─── Диалог ──────────────────────────────────────────────────────────────
 
@@ -196,6 +223,12 @@ export class UI {
     p.querySelectorAll<HTMLElement>('[data-use]').forEach((el) =>
       el.addEventListener('click', () => {
         this.game.useItem(el.dataset.use!);
+        this.renderPanel();
+      }),
+    );
+    p.querySelectorAll<HTMLElement>('[data-armor]').forEach((el) =>
+      el.addEventListener('click', () => {
+        this.game.equipArmor(el.dataset.armor === '-' ? null : el.dataset.armor!);
         this.renderPanel();
       }),
     );
@@ -268,7 +301,7 @@ export class UI {
     const list = items
       .map(([id, n]) => {
         const def = ITEMS[id];
-        const eq = g.inv.equipped === id ? ' <span class="eq">[в руках]</span>' : '';
+        const eq = g.inv.equipped === id ? ' <span class="eq">[в руках]</span>' : g.inv.armor === id ? ' <span class="eq">[надето]</span>' : '';
         return `<div class="item ${id === this.selectedItem ? 'sel' : ''}" data-item="${id}"><span>${esc(def.name)}${eq}</span><span>×${n}</span></div>`;
       })
       .join('') || '<div class="desc">Сумка пуста.</div>';
@@ -279,10 +312,20 @@ export class UI {
           ? `<button data-equip="-">Убрать</button>`
           : `<button data-equip="${sel.id}">Взять в руки</button>`;
       }
+      if (sel.armor) {
+        actions += g.inv.armor === sel.id
+          ? `<button data-armor="-">Снять</button>`
+          : `<button data-armor="${sel.id}">Надеть</button>`;
+      }
       if (sel.kind === 'consumable') actions += `<button data-use="${sel.id}">Использовать${g.mode === 'combat' ? ` (${sel.useAp} ОД)` : ''}</button>`;
     }
     const w = sel?.weapon;
-    const stats = w
+    const ar = sel?.armor;
+    const stats = ar
+      ? `<div class="row"><span>Класс брони</span><span class="v">+${ar.ac}</span></div>
+         <div class="row"><span>Порог урона</span><span class="v">${ar.dt}</span></div>
+         <div class="row"><span>Сопротивление</span><span class="v">${Math.round(ar.dr * 100)}%</span></div>`
+      : w
       ? `<div class="row"><span>Урон</span><span class="v">${w.dmg[0]}–${w.dmg[1]}</span></div>
          <div class="row"><span>Очки действия</span><span class="v">${w.ap}</span></div>
          <div class="row"><span>Дальность</span><span class="v">${w.range} м</span></div>
@@ -298,8 +341,11 @@ export class UI {
           ${stats}
           <div class="desc">${sel ? esc(sel.desc) : ''}</div>
           <div class="actions">${actions}</div>
-          <h3 style="margin-top:14px">В руках</h3>
-          <div class="row"><span>${esc(g.inv.weaponName)}</span><span class="v">ОЗ ${g.char.hp}/${g.char.maxHp}</span></div>
+          <h3 style="margin-top:14px">Снаряжение</h3>
+          <div class="row"><span>В руках</span><span class="v">${esc(g.inv.weaponName)}</span></div>
+          <div class="row"><span>Броня</span><span class="v">${esc(g.inv.armor ? ITEMS[g.inv.armor].name : 'нет')}</span></div>
+          <div class="row"><span>КБ / Порог / Сопр.</span><span class="v">${g.playerAC} / ${g.playerArmor.dt} / ${Math.round(g.playerArmor.dr * 100)}%</span></div>
+          <div class="row"><span>Здоровье</span><span class="v">${g.char.hp}/${g.char.maxHp}</span></div>
         </div>
       </div>`;
   }
@@ -350,7 +396,7 @@ export class UI {
           <h3 style="margin-top:12px">Показатели</h3>
           <div class="row"><span>Очки здоровья</span><span class="v">${c.hp}/${c.maxHp}</span></div>
           <div class="row"><span>Очки действия</span><span class="v">${c.maxAp}</span></div>
-          <div class="row"><span>Класс брони</span><span class="v">${c.ac}</span></div>
+          <div class="row"><span>Класс брони</span><span class="v">${this.game.playerAC}</span></div>
           <div class="row"><span>Урон в ближнем бою</span><span class="v">+${c.meleeBonus}</span></div>
           <div class="row"><span>Очерёдность</span><span class="v">${c.sequence}</span></div>
           <div class="row"><span>Шанс крит. удара</span><span class="v">${c.critChance}%</span></div>
@@ -443,7 +489,7 @@ export class UI {
               <h3 style="margin-top:12px">Показатели</h3>
               <div class="row"><span>Здоровье</span><span class="v">${c.maxHp}</span></div>
               <div class="row"><span>Очки действия</span><span class="v">${c.maxAp}</span></div>
-              <div class="row"><span>Класс брони</span><span class="v">${c.ac}</span></div>
+              <div class="row"><span>Класс брони</span><span class="v">${this.game.playerAC}</span></div>
               <div class="row"><span>Урон в ближнем бою</span><span class="v">+${c.meleeBonus}</span></div>
               <div class="desc">${c.special.in <= 3 ? 'С таким интеллектом разговоры будут... особенными.' : 'Распредели все очки и отметь три навыка.'}</div>
             </div>

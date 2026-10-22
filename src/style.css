@@ -129,7 +129,7 @@ button:disabled { color: #6d6252; cursor: default; }
   line-height: 1.1;
 }
 .stat .num.ok { color: #ffb15a; text-shadow: 0 0 8px #ff9a2a99; }
-.hud-right { display: flex; flex-direction: column; gap: 8px; justify-content: center; width: 200px; }
+.hud-right { display: flex; flex-direction: column; gap: 8px; justify-content: center; width: 260px; }
 #ap-bar { display: flex; gap: 3px; height: 22px; padding: 3px; background: #0a0806; border: 2px solid var(--rim-dark); }
 #ap-bar .pip { flex: 1; background: #1f2a14; border-radius: 50%; }
 #ap-bar .pip.on { background: radial-gradient(circle at 35% 35%, #c8ff7a, #4fbf2a 60%, #24600f); box-shadow: 0 0 6px #7fff4a99; }
@@ -346,3 +346,22 @@ button:disabled { color: #6d6252; cursor: default; }
 .trade-sum { margin-top: 8px; padding-top: 4px; border-top: 1px solid var(--crt-dim); color: var(--amber); }
 @media (max-width: 760px) { .trade-grid { grid-template-columns: 1fr 1fr; } }
 #clock { font-family: var(--font-crt); font-size: 20px; color: var(--crt); text-align: right; text-shadow: 0 0 6px #3cff5a88; line-height: 1; }
+
+/* ─── Прицельная атака ───────────────────────────────────────────────────── */
+
+#btn-aim.on { color: #ffe08a; background: linear-gradient(#6a5a2a, #3a3018); }
+#aim {
+  position: absolute;
+  width: 240px;
+  padding: 8px 10px;
+  font-size: 19px;
+  color: var(--crt);
+  background: #050c06f2;
+  border: 2px solid var(--crt-dim);
+  box-shadow: 0 8px 30px #000c;
+  text-shadow: 0 0 6px #3cff5a88;
+}
+.aim-title { color: var(--amber); margin-bottom: 6px; }
+.aim-opt { display: flex; justify-content: space-between; padding: 2px 4px; cursor: pointer; }
+.aim-opt:hover { background: #1f5a2a66; }
+.aim-opt.off { color: #2f6a38; cursor: default; }

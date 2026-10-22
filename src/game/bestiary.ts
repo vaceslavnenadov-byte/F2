@@ -39,6 +39,7 @@ export function gecko(id: string, golden: boolean, tag?: string): Actor {
     loot: golden ? [['goldHide', 1, 1]] : [['hide', 0, 1]],
     wanderRadius: 4,
     detectRadius: golden ? 6 : 8,
+    dt: golden ? 1 : 0,
   });
 }
 
@@ -60,7 +61,7 @@ export function bandit(id: string, variant = 0): Actor {
   return human(id, 'Бандит', looks[variant % 3], ranged ? 'gun' : 'spear', {
     faction: 'hostile', hp: 22, ap: 7, ac: 5, skill: ranged ? 48 : 55,
     attack: ranged ? ATTACKS.pistol : ATTACKS.club, xp: 100, sequence: 6, speed: 3.4,
-    loot: [['caps', 5, 30], ['ammo10', 0, 4], ['powder', 0, 1]], wanderRadius: 4, detectRadius: 11,
+    loot: [['caps', 5, 30], ['ammo10', 0, 4], ['powder', 0, 1], ['leatherJacket', 0, 1]], wanderRadius: 4, detectRadius: 11, dt: 0, dr: 0.15,
   });
 }
 
@@ -79,6 +80,6 @@ export function dog(): Actor {
 
 export function sulik(): Actor {
   return human('sulik', 'Сулик', { skin: SKIN.c, cloth: '#5a4030', hair: '#1a1210', top: '#6a4a2a', build: 1.18 }, 'spear', {
-    dialogue: 'sulik', hp: 42, ap: 8, ac: 8, skill: 68, attack: ATTACKS.club, sequence: 8, speed: 3.6,
+    dialogue: 'sulik', hp: 42, ap: 8, ac: 8, skill: 68, attack: ATTACKS.club, sequence: 8, speed: 3.6, dt: 1, dr: 0.1,
   });
 }

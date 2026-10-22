@@ -26,13 +26,16 @@ export interface ActorDef {
   loot?: [string, number, number][];
   wanderRadius?: number;
   detectRadius?: number;
+  /** Порог и сопротивление урону (естественная броня или одежда). */
+  dt?: number;
+  dr?: number;
 }
 
 export class Actor {
   readonly id: string;
   name: string;
   faction: Faction;
-  readonly rig: Rig;
+  rig: Rig;
   readonly pos = new THREE.Vector3();
   heading = 0;
   hp: number;
@@ -53,6 +56,10 @@ export class Actor {
   wanderRadius: number;
   detectRadius: number;
   dead = false;
+  dt: number;
+  dr: number;
+  /** Искалеченные конечности после прицельных попаданий. */
+  crippled = new Set<'arm' | 'leg'>();
   /** Следует за этим актёром (пёс за игроком). */
   follow: Actor | null = null;
   wanderTimer = Math.random() * 5;
@@ -80,10 +87,28 @@ export class Actor {
     this.loot = def.loot ?? [];
     this.wanderRadius = def.wanderRadius ?? 0;
     this.detectRadius = def.detectRadius ?? 0;
+    this.dt = def.dt ?? 0;
+    this.dr = def.dr ?? 0;
     this.rig.root.userData.actor = this;
   }
 
   get object() { return this.rig.root; }
+
+  /** Замена модели (например, когда надели броню): переносим позицию и «хитбокс». */
+  replaceRig(rig: Rig) {
+    const old = this.rig.root;
+    const parent = old.parent;
+    const proxy = old.children.find((c) => c.userData.actor === this);
+    if (proxy) rig.root.add(proxy);
+    rig.root.position.copy(old.position);
+    rig.root.rotation.copy(old.rotation);
+    rig.root.userData.actor = this;
+    if (parent) {
+      parent.remove(old);
+      parent.add(rig.root);
+    }
+    this.rig = rig;
+  }
   get moving() { return this.path.length > 0; }
 
   place(x: number, z: number) {

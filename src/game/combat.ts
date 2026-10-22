@@ -6,6 +6,20 @@ import type { Cell } from '../world/nav';
 import type { Game } from './game';
 import type { WeaponStats } from './items';
 
+export type BodyPart = 'torso' | 'head' | 'eyes' | 'arms' | 'legs';
+
+/** Прицельные атаки: штраф к попаданию, множитель урона, бонус к криту, увечье. */
+export const BODY_PARTS: Record<BodyPart, { name: string; acc: string; mod: number; mult: number; crit: number; cripple?: 'arm' | 'leg' }> = {
+  torso: { name: 'Торс', acc: 'в торс', mod: 0, mult: 1, crit: 0 },
+  head: { name: 'Голова', acc: 'в голову', mod: -40, mult: 1.3, crit: 20 },
+  eyes: { name: 'Глаза', acc: 'в глаза', mod: -60, mult: 1.5, crit: 35 },
+  arms: { name: 'Руки', acc: 'по рукам', mod: -30, mult: 1, crit: 0, cripple: 'arm' },
+  legs: { name: 'Ноги', acc: 'по ногам', mod: -20, mult: 1, crit: 0, cripple: 'leg' },
+};
+
+/** Прицельная атака стоит на 1 ОД дороже. */
+export const AIM_AP = 1;
+
 /** Диагональ = 1 ОД, как шаг по гексу в оригинале. */
 const COMBAT_DIAG = 1.001;
 
@@ -84,7 +98,8 @@ export class Combat {
           g.ui.updateHud();
           await new Promise<void>((resolve) => (this.endTurnResolve = resolve));
         } else {
-          a.ap = a.maxAp;
+          // Искалеченная нога отнимает очки действия.
+          a.ap = Math.max(2, a.maxAp - (a.crippled.has('leg') ? 3 : 0));
           g.ui.updateHud();
           await this.aiTurn(a);
         }
@@ -127,10 +142,11 @@ export class Combat {
     return a === this.game.player ? this.game.inv.weapon : a.attack!;
   }
 
-  hitChance(attacker: Actor, target: Actor, w: WeaponStats): number {
+  hitChance(attacker: Actor, target: Actor, w: WeaponStats, part: BodyPart = 'torso'): number {
     const g = this.game;
     const isPlayer = attacker === g.player;
-    let chance = (isPlayer ? g.char.skill(w.skill) : attacker.skill) - (target === g.player ? g.char.ac : target.ac);
+    let chance = (isPlayer ? g.char.skill(w.skill) : attacker.skill) - (target === g.player ? g.playerAC : target.ac) + BODY_PARTS[part].mod;
+    if (attacker.crippled.has('arm')) chance -= 20;
     if (!w.melee) {
       const pe = isPlayer ? g.char.special.pe : 5;
       chance -= Math.max(0, attacker.distanceTo(target) - pe * 1.5) * 4;
@@ -156,14 +172,14 @@ export class Combat {
   }
 
   /** Стоимость атаки с подходом для игрока: { path, total } либо null. */
-  planPlayerAttack(target: Actor): { path: Cell[]; total: number } | null {
+  planPlayerAttack(target: Actor, part: BodyPart = 'torso'): { path: Cell[]; total: number } | null {
     const w = this.game.inv.weapon;
     const path = this.approachPath(this.game.player, target, w.range);
     if (!path) return null;
-    return { path, total: path.length + w.ap };
+    return { path, total: path.length + w.ap + (part === 'torso' ? 0 : AIM_AP) };
   }
 
-  async playerAttack(target: Actor) {
+  async playerAttack(target: Actor, part: BodyPart = 'torso') {
     const g = this.game;
     const p = g.player;
     if (!this.isPlayerTurn || target.dead) return;
@@ -172,7 +188,7 @@ export class Combat {
       g.ui.log('Нет патронов!', 'warn');
       return;
     }
-    const plan = this.planPlayerAttack(target);
+    const plan = this.planPlayerAttack(target, part);
     if (!plan) {
       g.ui.log('Не подобраться к цели.', 'warn');
       return;
@@ -183,10 +199,9 @@ export class Combat {
     }
     this.busy = true;
     await this.moveSteps(p, plan.path);
-    p.ap -= plan.path.length;
-    p.ap -= w.ap;
+    p.ap -= plan.total;
     if (w.ammo) g.inv.remove(w.ammo, 1);
-    await this.strike(p, target, w);
+    await this.strike(p, target, w, part);
     this.busy = false;
     this.afterPlayerAction();
   }
@@ -229,7 +244,7 @@ export class Combat {
   }
 
   /** Сама атака: анимация, бросок на попадание, урон, эффекты. */
-  async strike(attacker: Actor, target: Actor, w: WeaponStats) {
+  async strike(attacker: Actor, target: Actor, w: WeaponStats, part: BodyPart = 'torso') {
     const g = this.game;
     attacker.faceTowards(target.pos);
     await wait(0.15);
@@ -237,7 +252,8 @@ export class Combat {
     if (!w.melee) g.effects.muzzle(attacker, target);
     audio.play(w.melee ? 'swing' : 'shot', attacker.pos);
     await wait(w.melee ? 0.2 : 0.08);
-    const chance = this.hitChance(attacker, target, w);
+    const chance = this.hitChance(attacker, target, w, part);
+    const bp = BODY_PARTS[part];
     const roll = randInt(1, 100);
     const isPlayer = attacker === g.player;
     const tName = target === g.player ? 'вас' : target.name.toLowerCase();
@@ -249,13 +265,27 @@ export class Combat {
       await wait(0.45);
       return;
     }
-    let dmg = randInt(w.dmg[0], w.dmg[1]) + (w.melee && isPlayer ? g.char.meleeBonus : 0);
-    const crit = randInt(1, 100) <= (isPlayer ? g.char.critChance : 3);
-    if (crit) dmg *= 2;
+    const raw = randInt(w.dmg[0], w.dmg[1]) + (w.melee && isPlayer ? g.char.meleeBonus : 0);
+    const crit = randInt(1, 100) <= (isPlayer ? g.char.critChance : 3) + bp.crit;
+    // Броня: порог урона вычитается, сопротивление режет остаток. Крит пробивает порог.
+    const armor = target === g.player ? g.playerArmor : { dt: target.dt, dr: target.dr };
+    let dmg = raw * bp.mult * (crit ? 2 : 1);
+    dmg = Math.max(0, Math.round((dmg - (crit ? 0 : armor.dt)) * (1 - armor.dr)));
+    const where = part === 'torso' ? '' : ` ${bp.acc}`;
+    if (dmg === 0) {
+      g.ui.floatText(target.pos.clone().setY(target.pos.y + target.rig.height + 0.3), 'Броня', '#a0b4ff');
+      g.ui.log(`Удар${where} не пробил броню.`);
+      await wait(0.45);
+      return;
+    }
     g.damage(target, dmg, attacker);
+    if (bp.cripple && !target.dead && (crit || Math.random() < 0.5) && !target.crippled.has(bp.cripple)) {
+      target.crippled.add(bp.cripple);
+      g.ui.log(bp.cripple === 'leg' ? `${target.name}: нога искалечена! Цель теряет подвижность.` : `${target.name}: рука искалечена! Цель хуже бьёт.`, 'good');
+    }
     const critText = crit ? 'Критический удар! ' : '';
     const msg = isPlayer
-      ? `${critText}Вы поразили цель (${tName}): ${dmg} ед. урона.`
+      ? `${critText}Вы поразили цель (${tName})${where}: ${dmg} ед. урона.`
       : target === g.player
         ? `${critText}${attacker.name} наносит вам ${dmg} ед. урона.`
         : `${critText}${attacker.name} бьёт цель (${tName}): ${dmg} ед. урона.`;

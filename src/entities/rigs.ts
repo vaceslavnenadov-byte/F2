@@ -101,7 +101,7 @@ export abstract class Rig {
 
 // ─── Человек ────────────────────────────────────────────────────────────────
 
-export type WeaponVisual = 'none' | 'spear' | 'gun' | 'staff';
+export type WeaponVisual = 'none' | 'spear' | 'gun' | 'staff' | 'rifle' | 'sledge';
 
 export interface HumanoidLook {
   skin: THREE.ColorRepresentation;
@@ -112,7 +112,10 @@ export interface HumanoidLook {
   beard?: boolean;
   build?: number;
   scale?: number;
+  armor?: 'jacket' | 'leather' | 'metal';
 }
+
+const ARMOR_COLORS = { jacket: '#3e2c20', leather: '#5e3c22', metal: '#6e6c66' };
 
 type HumanBone = 'hips' | 'spine' | 'chest' | 'neck' | 'head' | 'upperArmL' | 'upperArmR' | 'foreArmL' | 'foreArmR' | 'handL' | 'handR' | 'thighL' | 'thighR' | 'shinL' | 'shinR' | 'footL' | 'footR' | 'weaponHolder';
 
@@ -200,6 +203,15 @@ function humanClips(): THREE.AnimationClip[] {
     chest: [[0, 0, 0, 0], [0.12, 0, 0.2, 0], [0.18, -0.05, 0.2, 0], [0.4, 0, 0.2, 0], [0.55, 0, 0, 0]],
     head: [[0, 0, 0, 0], [0.12, 0, 0.15, 0], [0.55, 0, 0, 0]],
   };
+  // Удар кувалдой: замах над головой и удар сверху вниз.
+  const swing: R = {
+    ...lunge(0.32, 0.65),
+    upperArmR: [[0, -0.15, 0, -0.1], [0.18, -2.8, 0, -0.1], [0.32, -0.9, 0, 0], [0.45, -0.8, 0, 0], [0.65, -0.15, 0, -0.1]],
+    foreArmR: [[0, -0.65, 0, 0], [0.18, -0.6, 0, 0], [0.32, -0.1, 0, 0], [0.65, -0.65, 0, 0]],
+    weaponHolder: [[0, 0, 0, 0], [0.18, 0, 0, 0], [0.32, 2.1, 0, 0], [0.45, 2.0, 0, 0], [0.65, 0, 0, 0]],
+    upperArmL: [[0, 0.05, 0, 0.1], [0.18, -2.5, 0, 0.2], [0.32, -0.9, 0, 0.1], [0.65, 0.05, 0, 0.1]],
+    spine: [[0, 0, 0, 0], [0.18, -0.2, 0, 0], [0.32, 0.3, 0, 0], [0.65, 0, 0, 0]],
+  };
   const hit: R = {
     spine: [[0, 0, 0, 0], [0.1, -0.3, 0, 0], [0.35, 0, 0, 0]],
     head: [[0, 0, 0, 0], [0.1, 0.25, 0, 0], [0.35, 0, 0, 0]],
@@ -229,6 +241,7 @@ function humanClips(): THREE.AnimationClip[] {
     makeClip('attack_spear', 0.6, spear as Record<string, RotKey[]>, lungePos(0.25, 0.6)),
     makeClip('attack_punch', 0.5, punch as Record<string, RotKey[]>, lungePos(0.22, 0.5)),
     makeClip('attack_gun', 0.55, gun as Record<string, RotKey[]>),
+    makeClip('attack_swing', 0.65, swing as Record<string, RotKey[]>, lungePos(0.32, 0.65)),
     makeClip('hit', 0.35, hit as Record<string, RotKey[]>, hitPos),
     makeClip('death', 1.1, death as Record<string, RotKey[]>, deathPos),
   ];
@@ -241,9 +254,11 @@ export class HumanoidRig extends Rig {
   private weapons: Record<WeaponVisual, THREE.Object3D | null>;
   private weapon: WeaponVisual = 'none';
   private inner = new THREE.Group();
+  readonly armorLook: HumanoidLook['armor'];
 
   constructor(look: HumanoidLook) {
     super();
+    this.armorLook = look.armor;
     const scale = look.scale ?? 1;
     const b = look.build ?? 1;
     this.height = 1.8 * scale;
@@ -252,7 +267,8 @@ export class HumanoidRig extends Rig {
     const skin = new THREE.Color(look.skin);
     const cloth = new THREE.Color(look.cloth);
     const hair = new THREE.Color(look.hair);
-    const top = look.top ? new THREE.Color(look.top) : null;
+    const topColor = look.armor ? ARMOR_COLORS[look.armor] : look.top;
+    const top = topColor ? new THREE.Color(topColor) : null;
     const leather = new THREE.Color('#4e3626');
     const dark = new THREE.Color('#140d08');
     const lips = skin.clone().multiplyScalar(0.8);
@@ -354,6 +370,24 @@ export class HumanoidRig extends Rig {
     holder.add(this.inner);
     sb.attach('handR', holder, V(-0.245 * b, 0.9, 0.01));
 
+    if (look.armor) {
+      const padMat = look.armor === 'metal' ? std('#8a8a86', 0.35, 0.8) : std(look.armor === 'leather' ? '#4a2e1a' : '#33241a', 0.75);
+      for (const [s2, x] of [['L', 1], ['R', -1]] as const) {
+        const pad = new THREE.Mesh(new THREE.SphereGeometry(0.085 * b, 12, 8, 0, Math.PI * 2, 0, Math.PI / 2), padMat);
+        pad.scale.set(1.1, 0.7, 1);
+        pad.rotation.z = -x * 0.35;
+        sb.attach(`upperArm${s2}`, pad, V(0.2 * x * b, 1.47, 0));
+      }
+      if (look.armor !== 'jacket') {
+        const plate = new THREE.Mesh(new THREE.BoxGeometry(0.3 * b, 0.26, 0.05), padMat);
+        sb.attach('chest', plate, V(0, 1.38, 0.14 * b));
+        const belt = new THREE.Mesh(new THREE.TorusGeometry(0.17 * b, 0.025, 6, 20), std('#2a1c12', 0.8));
+        belt.rotation.x = Math.PI / 2;
+        belt.scale.set(1.15, 0.82, 1);
+        sb.attach('hips', belt, V(0, 0.98, 0));
+      }
+    }
+
     const wood = std('#6a4a30', 0.85);
     const spear = new THREE.Group();
     const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.022, 2.1, 8), wood);
@@ -379,8 +413,26 @@ export class HumanoidRig extends Rig {
     const orb = new THREE.Mesh(new THREE.SphereGeometry(0.08, 10, 8), std('#e6dcc4', 0.6));
     orb.position.y = 1.28;
     staff.add(orb);
-    this.weapons = { none: null, spear, gun, staff };
-    for (const w of [spear, gun, staff]) {
+    const steel = std('#3c3c3e', 0.4, 0.8);
+    const rifle = new THREE.Group();
+    const rBarrel = new THREE.Mesh(new THREE.CylinderGeometry(0.015, 0.018, 0.75, 8), steel);
+    rBarrel.position.y = -0.42;
+    rifle.add(rBarrel);
+    const rBody = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.3, 0.08), std('#5a3a22', 0.7));
+    rBody.position.set(0, -0.02, -0.02);
+    rifle.add(rBody);
+    const rStock = new THREE.Mesh(new THREE.BoxGeometry(0.045, 0.28, 0.1), std('#5a3a22', 0.7));
+    rStock.position.set(0, 0.24, -0.05);
+    rifle.add(rStock);
+    const sledge = new THREE.Group();
+    const handle = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.025, 1.0, 8), wood);
+    handle.position.y = 0.25;
+    sledge.add(handle);
+    const head = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.14, 0.3), steel);
+    head.position.y = 0.75;
+    sledge.add(head);
+    this.weapons = { none: null, spear, gun, staff, rifle, sledge };
+    for (const w of [spear, gun, staff, rifle, sledge]) {
       w.visible = false;
       w.traverse((o) => ((o as THREE.Mesh).isMesh ? (o.castShadow = true) : null));
       this.inner.add(w);
@@ -397,11 +449,22 @@ export class HumanoidRig extends Rig {
     this.weapon = w;
     for (const [k, obj] of Object.entries(this.weapons)) if (obj) obj.visible = k === w;
     // Копьё и посох держим вертикально при согнутом локте.
-    this.inner.rotation.x = w === 'spear' || w === 'staff' ? 0.8 : 0;
+    this.inner.rotation.x = w === 'spear' || w === 'staff' || w === 'sledge' ? 0.8 : 0;
   }
 
   protected attackClip() {
-    return this.weapon === 'gun' ? 'attack_gun' : this.weapon === 'spear' || this.weapon === 'staff' ? 'attack_spear' : 'attack_punch';
+    switch (this.weapon) {
+      case 'gun':
+      case 'rifle':
+        return 'attack_gun';
+      case 'spear':
+      case 'staff':
+        return 'attack_spear';
+      case 'sledge':
+        return 'attack_swing';
+      default:
+        return 'attack_punch';
+    }
   }
 }
 

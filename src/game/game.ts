@@ -15,12 +15,14 @@ import { Actor } from '../entities/actor';
 import { HumanoidRig, LizardRig, QuadrupedRig } from '../entities/rigs';
 import { Character, type SkillId } from './character';
 import { Inventory, ITEMS, TRADERS, priceMult, itemPrice } from './items';
-import { Combat } from './combat';
+import { Combat, BODY_PARTS, AIM_AP, type BodyPart } from './combat';
 import { DIALOGUES, resolveText, type DialogueDef, type DialogueOption } from './dialogues';
 import { QUESTS, QUEST_GOALS, type QuestState } from './quests';
 import { dog as makeDog, sulik as makeSulik } from './bestiary';
 import { UI } from '../ui/ui';
 import { showWorldMap } from '../ui/worldmap';
+
+const PLAYER_LOOK = { skin: '#c48a60', cloth: '#6e5038', hair: '#3a2516', build: 1.05 };
 
 type Mode = 'menu' | 'explore' | 'combat' | 'dialogue' | 'dead' | 'map';
 
@@ -78,6 +80,8 @@ export class Game {
   /** Убийства по меткам заданий (nest, rats). */
   questKills: Record<string, number> = {};
   helpHidden = false;
+  /** Режим прицельной атаки: следующий клик по врагу открывает выбор части тела. */
+  aimMode = false;
   /** Товары торговцев (меняются после сделок). */
   traders: Record<string, Record<string, number>> = {};
 
@@ -145,7 +149,7 @@ export class Game {
       id: 'player',
       name: 'Вы',
       faction: 'player',
-      rig: new HumanoidRig({ skin: '#c48a60', cloth: '#6e5038', hair: '#3a2516', build: 1.05 }),
+      rig: new HumanoidRig(PLAYER_LOOK),
       hp: 30,
       ap: 8,
       ac: 5,
@@ -315,7 +319,7 @@ export class Game {
     this.player.hp = this.char.hp;
     this.player.maxHp = this.char.maxHp;
     this.player.ap = this.player.maxAp = this.char.maxAp;
-    this.updatePlayerWeapon();
+    this.updatePlayerLook();
     this.camTarget.copy(this.player.pos);
     this.ui.showHud(true);
     this.ui.updateHud();
@@ -558,11 +562,36 @@ export class Game {
       if (stock[item] <= 0) delete stock[item];
       this.inv.add(item, n);
     }
-    this.updatePlayerWeapon();
+    this.updatePlayerLook();
     this.ui.log(`Сделка с торговцем ${TRADERS[id].name} заключена.`, 'good');
     audio.play('coins');
     this.ui.updateHud();
     return true;
+  }
+
+  get playerAC() { return this.char.ac + (this.inv.armorStats?.ac ?? 0); }
+  get playerArmor() {
+    const a = this.inv.armorStats;
+    return { dt: a?.dt ?? 0, dr: a?.dr ?? 0 };
+  }
+
+  equipArmor(id: string | null) {
+    if (this.mode === 'combat') {
+      this.ui.log('Переодеваться в бою некогда.', 'warn');
+      return;
+    }
+    this.inv.armor = id;
+    this.updatePlayerLook();
+    this.ui.log(id ? `Надето: ${ITEMS[id].name}.` : 'Броня снята.');
+    this.ui.updateHud();
+  }
+
+  /** Перестраивает модель игрока под надетую броню. */
+  private updatePlayerLook() {
+    const look = this.inv.armorStats?.look;
+    const current = (this.player.rig as HumanoidRig).armorLook;
+    if (current !== look) this.player.replaceRig(new HumanoidRig({ ...PLAYER_LOOK, armor: look }));
+    this.updatePlayerWeapon();
   }
 
   equip(id: string | null) {
@@ -634,6 +663,37 @@ export class Game {
     void this.combat.run();
   }
 
+  toggleAim() {
+    this.aimMode = !this.aimMode;
+    this.ui.log(this.aimMode ? 'Прицельный режим: выберите цель, затем часть тела.' : 'Прицельный режим выключен.');
+    this.ui.updateHud();
+  }
+
+  private openAimMenu(target: Actor) {
+    const c = this.combat;
+    if (!c) return;
+    const w = this.inv.weapon;
+    const parts = Object.keys(BODY_PARTS) as BodyPart[];
+    this.ui.showAimMenu(
+      this.mouseClient.x,
+      this.mouseClient.y,
+      target.name,
+      parts.map((p) => {
+        const plan = c.planPlayerAttack(target, p);
+        return {
+          label: BODY_PARTS[p].name,
+          chance: c.hitChance(this.player, target, w, p),
+          ap: plan ? plan.total : 0,
+          enabled: !!plan && plan.total <= this.player.ap,
+        };
+      }),
+      (i) => {
+        this.aimMode = false;
+        void c.playerAttack(target, parts[i]);
+      },
+    );
+  }
+
   /** Вызывается в начале хода игрока: выполняет атаку, с которой начался бой. */
   onPlayerTurn() {
     if (this.pendingAttack && this.combat) {
@@ -647,6 +707,9 @@ export class Game {
 
   onCombatEnded() {
     this.combat = null;
+    this.aimMode = false;
+    this.ui.hideAimMenu();
+    for (const a of this.actors) a.crippled.clear();
     this.pendingAttack = null;
     this.pathMarkers.count = 0;
     if (this.player.dead) return;
@@ -812,8 +875,10 @@ export class Game {
     const h = this.hover;
     if (this.mode === 'combat') {
       if (!this.combat || !this.combat.isPlayerTurn) return;
-      if (h.actor && h.actor.faction === 'hostile' && !h.actor.dead) void this.combat.playerAttack(h.actor);
-      else if (h.cell) void this.combat.playerMove(h.cell);
+      if (h.actor && h.actor.faction === 'hostile' && !h.actor.dead) {
+        if (this.aimMode || this.keys.has('ShiftLeft') || this.keys.has('ShiftRight')) this.openAimMenu(h.actor);
+        else void this.combat.playerAttack(h.actor);
+      } else if (h.cell) void this.combat.playerMove(h.cell);
       return;
     }
     const token = ++this.clickToken;
@@ -959,9 +1024,10 @@ export class Game {
         if (a.faction === 'hostile' || a.faction === 'companion') tip += ` — ${this.healthWord(a)}`;
         if (a.faction === 'hostile' && this.combat?.isPlayerTurn) {
           const w = this.inv.weapon;
-          const plan = this.combat.planPlayerAttack(a);
+          const plan = this.combat.planPlayerAttack(a, this.aimMode ? 'head' : 'torso');
           if (plan) {
             const chance = this.combat.hitChance(this.player, a, w);
+            if (this.aimMode) tip += `<br><span class="warn">Прицельно: +${AIM_AP} ОД, выбор части тела</span>`;
             cost = plan.total;
             const enough = plan.total <= this.player.ap;
             tip += `<br>Шанс попадания: ${chance}% · <span class="${enough ? '' : 'bad'}">ОД: ${plan.total}</span>`;
