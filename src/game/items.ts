@@ -34,16 +34,51 @@ export const ITEMS: Record<string, ItemDef> = {
     desc: 'Самодельный однозарядный пистолет. Громкий, ненадёжный, но стреляет.',
     weapon: { skill: 'smallGuns', dmg: [6, 14], ap: 5, range: 14, melee: false, ammo: 'ammo10', visual: 'gun' },
   },
+  knife: {
+    id: 'knife', name: 'Нож', kind: 'weapon', value: 35,
+    desc: 'Короткий клинок из рессоры. Быстрый удар.',
+    weapon: { skill: 'melee', dmg: [2, 8], ap: 3, range: 1.5, melee: true, visual: 'none' },
+  },
+  pistol10: {
+    id: 'pistol10', name: '10-мм пистолет', kind: 'weapon', value: 250,
+    desc: 'Надёжный довоенный пистолет. Бьёт далеко и точно.',
+    weapon: { skill: 'smallGuns', dmg: [5, 12], ap: 5, range: 18, melee: false, ammo: 'ammo10', visual: 'gun' },
+  },
   ammo10: { id: 'ammo10', name: 'Патроны 10 мм', kind: 'ammo', value: 2, desc: 'Довоенные патроны. Редкость в племени.' },
   powder: {
     id: 'powder', name: 'Целебный порошок', kind: 'consumable', value: 20, heal: [10, 18], useAp: 2,
     desc: 'Толчёные травы племени. Лечит раны, но туманит голову.',
+  },
+  stimpak: {
+    id: 'stimpak', name: 'Стимулятор', kind: 'consumable', value: 75, heal: [15, 25], useAp: 2,
+    desc: 'Довоенный шприц с лечебной смесью. Быстро затягивает раны.',
   },
   hide: { id: 'hide', name: 'Шкура геккона', kind: 'misc', value: 15, desc: 'Прочная чешуйчатая кожа. Пригодится для обмена.' },
   goldHide: { id: 'goldHide', name: 'Шкура золотого геккона', kind: 'misc', value: 60, desc: 'Переливается на солнце. Ценный трофей.' },
   caps: { id: 'caps', name: 'Крышки', kind: 'misc', value: 1, desc: 'Бутылочные крышки — деньги пустоши.' },
   flint: { id: 'flint', name: 'Кремень', kind: 'misc', value: 5, desc: 'Острый камень. Хорош для наконечников.' },
 };
+
+/** Торговцы: имя, начальный товар и запас крышек. */
+export const TRADERS: Record<string, { name: string; stock: [string, number][] }> = {
+  hakunin: { name: 'Хакунин', stock: [['caps', 60], ['powder', 5], ['flint', 3]] },
+  maida: { name: 'Мэйда Бакнер', stock: [['caps', 350], ['powder', 6], ['ammo10', 30], ['knife', 2], ['flint', 4]] },
+  becky: { name: 'Бекки', stock: [['caps', 500], ['ammo10', 50], ['pistol10', 1], ['stimpak', 4], ['powder', 2], ['knife', 1]] },
+};
+
+/** Множители цен: чем выше Бартер, тем дешевле покупка и дороже продажа. */
+export function priceMult(barter: number) {
+  return {
+    buy: Math.max(1.1, 2.1 - barter / 100),
+    sell: Math.min(0.9, 0.35 + barter / 200),
+  };
+}
+
+export function itemPrice(id: string, mult: number, side: 'buy' | 'sell') {
+  if (id === 'caps') return 1;
+  const v = ITEMS[id].value * mult;
+  return Math.max(1, side === 'buy' ? Math.ceil(v) : Math.floor(v));
+}
 
 /** Удар кулаком, когда оружие не экипировано. */
 export const FISTS: WeaponStats = { skill: 'unarmed', dmg: [1, 3], ap: 3, range: 1.5, melee: true, visual: 'none' };

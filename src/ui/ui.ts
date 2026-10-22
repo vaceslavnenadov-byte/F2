@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { Character, SKILLS, SPECIAL_INFO, SPECIAL_KEYS, SPECIAL_POOL, type SkillId } from '../game/character';
-import { ITEMS } from '../game/items';
+import { ITEMS, TRADERS, itemPrice } from '../game/items';
 import { QUESTS } from '../game/quests';
 import type { Game } from '../game/game';
 
@@ -18,13 +18,14 @@ const LOCATION_NOTES: Record<string, string> = {
 
 interface Floater { el: HTMLDivElement; pos: THREE.Vector3; t: number }
 
-export type PanelKind = 'inv' | 'cha' | 'pip';
+export type PanelKind = 'inv' | 'cha' | 'pip' | 'trade';
 
 export class UI {
   private floaters: Floater[] = [];
   private bannerTimer = 0;
   panel: PanelKind | null = null;
   private selectedItem: string | null = null;
+  private trade: { id: string; mine: Map<string, number>; theirs: Map<string, number> } | null = null;
 
   constructor(private game: Game) {
     document.querySelectorAll<HTMLButtonElement>('.hud-buttons button').forEach((b) => {
@@ -166,8 +167,14 @@ export class UI {
     this.renderPanel();
   }
 
+  openTrade(id: string) {
+    this.trade = { id, mine: new Map(), theirs: new Map() };
+    this.openPanel('trade');
+  }
+
   closePanel() {
     this.panel = null;
+    this.trade = null;
     $('panel').classList.add('hidden');
   }
 
@@ -176,6 +183,7 @@ export class UI {
     const p = $('panel');
     if (this.panel === 'inv') p.innerHTML = this.inventoryHtml();
     else if (this.panel === 'cha') p.innerHTML = this.characterHtml();
+    else if (this.panel === 'trade') p.innerHTML = this.tradeHtml();
     else p.innerHTML = this.pipboyHtml();
     p.querySelector('[data-close]')?.addEventListener('click', () => this.closePanel());
     p.querySelectorAll<HTMLElement>('[data-item]').forEach((el) =>
@@ -196,6 +204,53 @@ export class UI {
         this.renderPanel();
       }),
     );
+    // Торговля: клик переносит 1 штуку (крышки — по 10), с Shift — всё.
+    p.querySelectorAll<HTMLElement>('[data-move]').forEach((el) =>
+      el.addEventListener('click', (e) => {
+        const t = this.trade;
+        if (!t) return;
+        const [from, id] = el.dataset.move!.split(':');
+        const stock = this.game.traderStock(t.id);
+        const pools: Record<string, [() => number, Map<string, number>]> = {
+          inv: [() => this.game.inv.count(id) - (t.mine.get(id) ?? 0), t.mine],
+          mine: [() => t.mine.get(id) ?? 0, t.mine],
+          stock: [() => (stock[id] ?? 0) - (t.theirs.get(id) ?? 0), t.theirs],
+          theirs: [() => t.theirs.get(id) ?? 0, t.theirs],
+        };
+        const [avail, target] = pools[from];
+        const n = Math.min(avail(), (e as MouseEvent).shiftKey ? Infinity : id === 'caps' ? 10 : 1);
+        if (n <= 0) return;
+        const sign = from === 'inv' || from === 'stock' ? 1 : -1;
+        const v = (target.get(id) ?? 0) + sign * n;
+        if (v > 0) target.set(id, v);
+        else target.delete(id);
+        this.renderPanel();
+      }),
+    );
+    p.querySelector('[data-deal]')?.addEventListener('click', () => {
+      const t = this.trade;
+      if (t && this.game.completeTrade(t.id, t.mine, t.theirs)) {
+        t.mine.clear();
+        t.theirs.clear();
+        this.renderPanel();
+      }
+    });
+    p.querySelector('[data-balance]')?.addEventListener('click', () => {
+      const t = this.trade;
+      if (!t) return;
+      // Уравниваем крышками: доплачиваем свои или берём сдачу у торговца.
+      t.mine.delete('caps');
+      t.theirs.delete('caps');
+      const { give, get } = this.game.tradeValue(t.mine, t.theirs);
+      if (get > give) {
+        const need = Math.min(this.game.inv.count('caps'), get - give);
+        if (need > 0) t.mine.set('caps', need);
+      } else if (give > get) {
+        const change = Math.min(this.game.traderStock(t.id).caps ?? 0, give - get);
+        if (change > 0) t.theirs.set('caps', change);
+      }
+      this.renderPanel();
+    });
     p.querySelectorAll<HTMLElement>('[data-skill]').forEach((el) =>
       el.addEventListener('click', () => {
         this.game.spendSkillPoint(el.dataset.skill as SkillId);
@@ -245,6 +300,35 @@ export class UI {
           <h3 style="margin-top:14px">В руках</h3>
           <div class="row"><span>${esc(g.inv.weaponName)}</span><span class="v">ОЗ ${g.char.hp}/${g.char.maxHp}</span></div>
         </div>
+      </div>`;
+  }
+
+  private tradeHtml(): string {
+    const g = this.game;
+    const t = this.trade!;
+    const stock = g.traderStock(t.id);
+    const m = g.prices;
+    const row = (move: string, id: string, n: number, price: number) =>
+      n > 0
+        ? `<div class="item" data-move="${move}:${id}"><span>${esc(ITEMS[id].name)}</span><span>×${n} <span class="eq">${id === 'caps' ? '' : price + '¢'}</span></span></div>`
+        : '';
+    const invList = [...g.inv.items.entries()].map(([id, n]) => row('inv', id, n - (t.mine.get(id) ?? 0), itemPrice(id, m.sell, 'sell'))).join('');
+    const mineList = [...t.mine.entries()].map(([id, n]) => row('mine', id, n, itemPrice(id, m.sell, 'sell'))).join('');
+    const theirsList = [...t.theirs.entries()].map(([id, n]) => row('theirs', id, n, itemPrice(id, m.buy, 'buy'))).join('');
+    const stockList = Object.entries(stock).map(([id, n]) => row('stock', id, n - (t.theirs.get(id) ?? 0), itemPrice(id, m.buy, 'buy'))).join('');
+    const { give, get } = g.tradeValue(t.mine, t.theirs);
+    const ok = give >= get && give + get > 0;
+    return `
+      <div class="panel-title"><span>ТОРГОВЛЯ: ${esc(TRADERS[t.id].name.toUpperCase())}</span><button data-close>Закрыть</button></div>
+      <div class="trade-grid">
+        <div class="box crt"><h3>Ваша сумка</h3>${invList || '<div class="desc">Пусто</div>'}</div>
+        <div class="box crt"><h3>Вы отдаёте</h3>${mineList || '<div class="desc">—</div>'}<div class="trade-sum">Цена: ${give}¢</div></div>
+        <div class="box crt"><h3>Вы получаете</h3>${theirsList || '<div class="desc">—</div>'}<div class="trade-sum">Цена: ${get}¢</div></div>
+        <div class="box crt"><h3>Товары торговца</h3>${stockList || '<div class="desc">Пусто</div>'}</div>
+      </div>
+      <div class="actions" style="justify-content:space-between;align-items:center">
+        <span class="desc" style="margin:0">Бартер ${g.char.skill('barter')}%: покупка ×${m.buy.toFixed(2)}, продажа ×${m.sell.toFixed(2)} · клик — 1 шт. (крышки по 10), Shift — всё</span>
+        <span><button data-balance>Уравнять крышками</button> <button data-deal ${ok ? '' : 'disabled'}>Сделка</button></span>
       </div>`;
   }
 

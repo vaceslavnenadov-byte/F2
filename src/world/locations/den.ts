@@ -110,7 +110,7 @@ function spawn(g: Game) {
   add(human('slaver1', 'Работорговец', { skin: SKIN.b, cloth: '#2a2622', hair: '#141010', top: '#4a2a1a', build: 1.1 }, 'spear', { dialogue: 'slaver', wanderRadius: 2 }), GUILD.x - 5, GUILD.z + 6);
   if (!g.flags.has('vicFree')) add(human('vic', 'Вик', { skin: SKIN.pale, cloth: '#4a4a3a', hair: '#6a6a60', top: '#5a5a48', beard: true, build: 0.95 }, 'none', { dialogue: 'vic' }), CAGE.x, CAGE.z);
   else if (!g.flags.has('vicLeft')) add(human('vic', 'Вик', { skin: SKIN.pale, cloth: '#4a4a3a', hair: '#6a6a60', top: '#5a5a48', beard: true, build: 0.95 }, 'none', { dialogue: 'vic', wanderRadius: 3 }), CAGE.x + 3, CAGE.z + 3);
-  add(human('becky', 'Бекки', { skin: SKIN.b, cloth: '#5a3a3a', hair: '#1a1210', top: '#7a3a4a', build: 0.95 }, 'none', { dialogue: 'denFolk' }), -20, 9);
+  add(human('becky', 'Бекки', { skin: SKIN.b, cloth: '#5a3a3a', hair: '#1a1210', top: '#7a3a4a', build: 0.95 }, 'none', { dialogue: 'becky' }), -20, 9);
   const junk: [number, number][] = [[-8, 2], [5, 10], [20, -4], [-30, 0]];
   junk.forEach(([x, z], i) =>
     add(human(`junkie${i}`, i % 2 ? 'Наркоман' : 'Бродяга', { skin: i % 2 ? SKIN.pale : SKIN.b, cloth: '#3a3530', hair: '#2a2420', top: i % 2 ? '#4a4a40' : undefined, build: 0.85 }, 'none', { dialogue: 'denFolk', wanderRadius: 8 }), x, z),

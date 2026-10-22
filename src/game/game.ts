@@ -13,7 +13,7 @@ import type { LocationDef } from '../world/locations/types';
 import { Actor } from '../entities/actor';
 import { HumanoidRig, LizardRig, QuadrupedRig } from '../entities/rigs';
 import { Character, type SkillId } from './character';
-import { Inventory, ITEMS } from './items';
+import { Inventory, ITEMS, TRADERS, priceMult, itemPrice } from './items';
 import { Combat } from './combat';
 import { DIALOGUES, resolveText, type DialogueDef, type DialogueOption } from './dialogues';
 import { QUESTS, QUEST_GOALS, type QuestState } from './quests';
@@ -47,6 +47,7 @@ interface SaveData {
   days: number;
   kills: number;
   questKills: Record<string, number>;
+  traders: Record<string, Record<string, number>>;
 }
 
 export class Game {
@@ -76,6 +77,8 @@ export class Game {
   /** Убийства по меткам заданий (nest, rats). */
   questKills: Record<string, number> = {};
   helpHidden = false;
+  /** Товары торговцев (меняются после сделок). */
+  traders: Record<string, Record<string, number>> = {};
 
   private camYaw = 2.55;
   private camPitch = 0.92;
@@ -327,6 +330,7 @@ export class Game {
       days: this.days,
       kills: this.kills,
       questKills: this.questKills,
+      traders: this.traders,
     };
     try {
       localStorage.setItem(SAVE_KEY, JSON.stringify(data));
@@ -387,6 +391,7 @@ export class Game {
     this.days = d.days;
     this.kills = d.kills;
     this.questKills = d.questKills;
+    this.traders = d.traders ?? {};
     // Восстанавливаем отряд до входа в локацию, чтобы он появился рядом с игроком.
     const restored: Actor[] = [];
     if (this.flags.has('dogFound') && this.quests.dog?.state !== 'rewarded' && !this.flags.has('dogDead')) restored.push(this.dog);
@@ -500,6 +505,50 @@ export class Game {
     this.r.scene.remove(a.object);
     this.actors = this.actors.filter((x) => x !== a);
     this.hitProxies = this.hitProxies.filter((p) => p.userData.actor !== a);
+  }
+
+  // ─── Торговля ──────────────────────────────────────────────────────────────
+
+  traderStock(id: string): Record<string, number> {
+    this.traders[id] ??= Object.fromEntries(TRADERS[id].stock);
+    return this.traders[id];
+  }
+
+  get prices() { return priceMult(this.char.skill('barter')); }
+
+  openTrade(id: string) {
+    this.closeDialogue();
+    this.traderStock(id);
+    this.ui.openTrade(id);
+  }
+
+  /** Стоимость предложений: мы продаём по цене sell, покупаем по цене buy. */
+  tradeValue(mine: Map<string, number>, theirs: Map<string, number>) {
+    const m = this.prices;
+    let give = 0;
+    let get = 0;
+    for (const [id, n] of mine) give += itemPrice(id, m.sell, 'sell') * n;
+    for (const [id, n] of theirs) get += itemPrice(id, m.buy, 'buy') * n;
+    return { give, get };
+  }
+
+  completeTrade(id: string, mine: Map<string, number>, theirs: Map<string, number>): boolean {
+    const { give, get } = this.tradeValue(mine, theirs);
+    if (give < get || (give === 0 && get === 0)) return false;
+    const stock = this.traderStock(id);
+    for (const [item, n] of mine) {
+      this.inv.remove(item, n);
+      stock[item] = (stock[item] ?? 0) + n;
+    }
+    for (const [item, n] of theirs) {
+      stock[item] -= n;
+      if (stock[item] <= 0) delete stock[item];
+      this.inv.add(item, n);
+    }
+    this.updatePlayerWeapon();
+    this.ui.log(`Сделка с торговцем ${TRADERS[id].name} заключена.`, 'good');
+    this.ui.updateHud();
+    return true;
   }
 
   equip(id: string | null) {

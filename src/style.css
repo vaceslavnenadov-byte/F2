@@ -338,3 +338,10 @@ button:disabled { color: #6d6252; cursor: default; }
   .worldmap { flex-direction: column; }
   .wm-side { width: auto; flex: none; }
 }
+
+/* ─── Торговля ───────────────────────────────────────────────────────────── */
+
+.trade-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.trade-grid .box { min-height: 220px; font-size: 17px; }
+.trade-sum { margin-top: 8px; padding-top: 4px; border-top: 1px solid var(--crt-dim); color: var(--amber); }
+@media (max-width: 760px) { .trade-grid { grid-template-columns: 1fr 1fr; } }

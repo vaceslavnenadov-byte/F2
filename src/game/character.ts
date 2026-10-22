@@ -20,6 +20,7 @@ export const SKILLS = [
   { id: 'unarmed', name: 'Без оружия', base: (s: Special) => 30 + 2 * (s.ag + s.st) },
   { id: 'firstAid', name: 'Первая помощь', base: (s: Special) => 2 * (s.pe + s.in) },
   { id: 'speech', name: 'Красноречие', base: (s: Special) => 5 * s.ch },
+  { id: 'barter', name: 'Бартер', base: (s: Special) => 4 * s.ch },
   { id: 'outdoorsman', name: 'Натуралист', base: (s: Special) => 2 * (s.en + s.in) },
 ] as const;
 export type SkillId = (typeof SKILLS)[number]['id'];
@@ -30,7 +31,7 @@ export class Character {
   name = 'Избранный';
   special: Special = { st: 5, pe: 5, en: 5, ch: 5, in: 5, ag: 5, lk: 5 };
   tags = new Set<SkillId>();
-  spent: Record<SkillId, number> = { smallGuns: 0, melee: 0, unarmed: 0, firstAid: 0, speech: 0, outdoorsman: 0 };
+  spent: Record<SkillId, number> = { smallGuns: 0, melee: 0, unarmed: 0, firstAid: 0, speech: 0, barter: 0, outdoorsman: 0 };
   level = 1;
   xp = 0;
   skillPoints = 0;
@@ -75,7 +76,7 @@ export class Character {
     c.name = d.name;
     c.special = { ...d.special };
     c.tags = new Set(d.tags);
-    c.spent = { ...d.spent };
+    c.spent = { ...c.spent, ...d.spent };
     c.level = d.level;
     c.xp = d.xp;
     c.skillPoints = d.skillPoints;

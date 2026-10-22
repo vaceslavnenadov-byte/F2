@@ -230,6 +230,7 @@ export const DIALOGUES: Record<string, DialogueDef> = {
       after: {
         text: 'Духи шепчут, что ты ещё вернёшься ко мне. Береги себя.',
         options: [
+          { text: 'Обменяемся? У меня есть шкуры.', action: (g) => g.openTrade('hakunin'), next: null },
           { text: 'Как лучше лечить раны?', next: 'howto' },
           { text: 'Прощай.', next: null },
         ],
@@ -257,6 +258,7 @@ export const DIALOGUES: Record<string, DialogueDef> = {
             },
             next: 'vic',
           },
+          { text: 'Давай поторгуем.', action: (g) => g.openTrade('maida'), next: null },
           { text: 'Что за город Кламат?', next: 'town' },
           { text: 'Нет ли работы?', cond: (g) => !g.quests.rats, next: 'job' },
           { text: 'Насчёт крыс…', cond: (g) => g.quests.rats?.state === 'active', next: 'ratsWait' },
@@ -485,6 +487,24 @@ export const DIALOGUES: Record<string, DialogueDef> = {
       after: {
         text: 'Береги себя в дороге. Я ещё немного побуду в Дэне, а потом — домой.',
         options: [{ text: 'Удачи, Вик.', next: null }],
+      },
+    },
+  },
+
+  becky: {
+    start: () => 'hello',
+    nodes: {
+      hello: {
+        text: 'Добро пожаловать в лучший бар Дэна. Ну, единственный. Выпивка, патроны, стимуляторы — плати крышками или хабаром.',
+        options: [
+          { text: 'Покажи товар.', action: (g) => g.openTrade('becky'), next: null },
+          { text: 'Что слышно в городе?', next: 'rumors' },
+          { text: 'Пока.', next: null },
+        ],
+      },
+      rumors: {
+        text: 'Мецгер держит в клетке старика-торговца. А в южном переулке засели бандиты — режут всех, кто сунется. Если перебьёшь их, весь Дэн скажет спасибо.',
+        options: [{ text: 'Учту.', next: 'hello' }],
       },
     },
   },
