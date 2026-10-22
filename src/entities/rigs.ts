@@ -1,74 +1,102 @@
 import * as THREE from 'three';
-import { clamp, easeInOut, lerp } from '../core/math';
+import { clamp, lerp } from '../core/math';
+import { SkinBuilder, blend, only, makeClip, sineKeys, type RotKey, type PosKey } from './skin';
 
-/** Процедурная модель с анимацией: ходьба, атака, получение урона, смерть. Смотрит вдоль +Z. */
-export abstract class Rig {
-  readonly root = new THREE.Group();
-  /** Внутренний контейнер — его поворачиваем при падении, не трогая позицию актёра. */
-  protected readonly body = new THREE.Group();
-  protected phase = 0;
-  protected moveBlend = 0;
-  protected attackT = -1;
-  protected hitT = -1;
-  protected deathT = -1;
-  protected time = Math.random() * 10;
-  abstract readonly height: number;
-  /** Длина шага — согласует частоту ног со скоростью. */
-  protected stride = 1.2;
-
-  constructor() {
-    this.root.add(this.body);
-  }
-
-  playAttack() { this.attackT = 0; }
-  playHit() { if (this.deathT < 0) this.hitT = 0; }
-  playDeath() { this.deathT = 0; }
-  get isDead() { return this.deathT >= 0; }
-
-  update(dt: number, speed: number) {
-    this.time += dt;
-    this.moveBlend = lerp(this.moveBlend, speed > 0.05 ? 1 : 0, clamp(dt * 8, 0, 1));
-    this.phase += (dt * speed * Math.PI) / this.stride;
-    if (this.attackT >= 0) {
-      this.attackT += dt;
-      if (this.attackT > 0.55) this.attackT = -1;
-    }
-    if (this.hitT >= 0) {
-      this.hitT += dt;
-      if (this.hitT > 0.35) this.hitT = -1;
-    }
-    if (this.deathT >= 0) this.deathT = Math.min(1, this.deathT + dt * 1.6);
-    this.pose();
-  }
-
-  /** Кривая атаки: быстрый выпад, медленный возврат. 0..1..0 */
-  protected attackCurve(): number {
-    if (this.attackT < 0) return 0;
-    const t = this.attackT / 0.55;
-    return t < 0.3 ? easeInOut(t / 0.3) : 1 - easeInOut((t - 0.3) / 0.7);
-  }
-
-  protected hitCurve(): number {
-    return this.hitT < 0 ? 0 : Math.sin((this.hitT / 0.35) * Math.PI);
-  }
-
-  protected abstract pose(): void;
-
-  protected shadows() {
-    this.root.traverse((o) => {
-      if ((o as THREE.Mesh).isMesh) o.castShadow = true;
-    });
-  }
-}
+const V = (x: number, y: number, z: number) => new THREE.Vector3(x, y, z);
 
 function std(color: THREE.ColorRepresentation, roughness = 0.8, metalness = 0) {
   return new THREE.MeshStandardMaterial({ color, roughness, metalness });
 }
 
-function capsule(r: number, len: number, mat: THREE.Material, y: number): THREE.Mesh {
-  const m = new THREE.Mesh(new THREE.CapsuleGeometry(r, len, 4, 10), mat);
-  m.position.y = y;
-  return m;
+/**
+ * Скелетная модель с AnimationMixer: циклы «покой» и «ходьба» смешиваются по скорости,
+ * разовые действия (удар, попадание) временно перекрывают их, смерть фиксируется последним кадром.
+ * Модель смотрит вдоль +Z.
+ */
+export abstract class Rig {
+  readonly root = new THREE.Group();
+  abstract readonly height: number;
+  protected mixer!: THREE.AnimationMixer;
+  private idle!: THREE.AnimationAction;
+  private walk!: THREE.AnimationAction;
+  private actions = new Map<string, THREE.AnimationAction>();
+  private oneShot: { action: THREE.AnimationAction; t: number; dur: number } | null = null;
+  private dead = false;
+  protected moveBlend = 0;
+  protected time = Math.random() * 10;
+  /** Расстояние, проходимое за один цикл анимации ходьбы. */
+  protected cycleDistance = 2;
+
+  protected setupAnimations(target: THREE.Object3D, clips: THREE.AnimationClip[]) {
+    this.mixer = new THREE.AnimationMixer(target);
+    for (const c of clips) this.actions.set(c.name, this.mixer.clipAction(c));
+    this.idle = this.actions.get('idle')!;
+    this.walk = this.actions.get('walk')!;
+    this.idle.play();
+    this.walk.play();
+    this.walk.time = Math.random();
+    this.walk.setEffectiveWeight(0);
+  }
+
+  protected attackClip(): string { return 'attack'; }
+
+  private playOnce(name: string) {
+    const a = this.actions.get(name);
+    if (!a || this.dead) return;
+    if (this.oneShot && this.oneShot.action !== a) this.oneShot.action.stop();
+    a.reset();
+    a.setLoop(THREE.LoopOnce, 1);
+    a.clampWhenFinished = true;
+    a.play();
+    this.oneShot = { action: a, t: 0, dur: a.getClip().duration };
+  }
+
+  playAttack() { this.playOnce(this.attackClip()); }
+  playHit() { this.playOnce('hit'); }
+  playDeath() {
+    if (this.dead) return;
+    this.oneShot?.action.stop();
+    this.oneShot = null;
+    this.dead = true;
+    const a = this.actions.get('death')!;
+    a.reset();
+    a.setLoop(THREE.LoopOnce, 1);
+    a.clampWhenFinished = true;
+    a.setEffectiveWeight(1);
+    a.play();
+  }
+  get isDead() { return this.dead; }
+
+  update(dt: number, speed: number) {
+    this.time += dt;
+    this.moveBlend = lerp(this.moveBlend, speed > 0.05 ? 1 : 0, clamp(dt * 8, 0, 1));
+    const dur = this.walk.getClip().duration;
+    this.walk.timeScale = Math.max(0.35, (speed * dur) / this.cycleDistance);
+    if (this.dead) {
+      this.idle.setEffectiveWeight(0);
+      this.walk.setEffectiveWeight(0);
+    } else {
+      let os = 0;
+      if (this.oneShot) {
+        const s = this.oneShot;
+        s.t += dt;
+        os = Math.min(1, s.t / 0.06) * Math.min(1, Math.max(0, (s.dur - s.t) / 0.15));
+        s.action.setEffectiveWeight(os);
+        if (s.t >= s.dur) {
+          s.action.stop();
+          this.oneShot = null;
+          os = 0;
+        }
+      }
+      this.idle.setEffectiveWeight((1 - this.moveBlend) * (1 - os));
+      this.walk.setEffectiveWeight(this.moveBlend * (1 - os));
+    }
+    this.mixer.update(dt);
+    this.post(dt);
+  }
+
+  /** Процедурные добавки поверх анимации. */
+  protected post(_dt: number) {}
 }
 
 // ─── Человек ────────────────────────────────────────────────────────────────
@@ -79,331 +107,448 @@ export interface HumanoidLook {
   skin: THREE.ColorRepresentation;
   cloth: THREE.ColorRepresentation;
   hair: THREE.ColorRepresentation;
-  /** Накидка/жилет. */
+  /** Жилет/накидка. */
   top?: THREE.ColorRepresentation;
   beard?: boolean;
   build?: number;
   scale?: number;
 }
 
+type HumanBone = 'hips' | 'spine' | 'chest' | 'neck' | 'head' | 'upperArmL' | 'upperArmR' | 'foreArmL' | 'foreArmR' | 'handL' | 'handR' | 'thighL' | 'thighR' | 'shinL' | 'shinR' | 'footL' | 'footR' | 'weaponHolder';
+
+function humanClips(): THREE.AnimationClip[] {
+  type R = Partial<Record<HumanBone, RotKey[]>>;
+  const HIP_Y = 0.95;
+
+  const idle: R = {
+    chest: [[0, 0, 0, 0], [1.5, 0.035, 0, 0], [3, 0, 0, 0]],
+    head: [[0, 0, 0, 0], [1, 0.02, 0.12, 0], [2, 0, -0.08, 0], [3, 0, 0, 0]],
+    upperArmL: [[0, 0.05, 0, 0.1], [1.5, 0.08, 0, 0.13], [3, 0.05, 0, 0.1]],
+    upperArmR: [[0, -0.15, 0, -0.1], [1.5, -0.13, 0, -0.13], [3, -0.15, 0, -0.1]],
+    foreArmL: [[0, -0.15, 0, 0], [3, -0.15, 0, 0]],
+    foreArmR: [[0, -0.65, 0, 0], [3, -0.65, 0, 0]],
+    thighL: [[0, 0, 0, 0.02], [3, 0, 0, 0.02]],
+    thighR: [[0, 0, 0, -0.02], [3, 0, 0, -0.02]],
+    shinL: [[0, 0.03, 0, 0], [3, 0.03, 0, 0]],
+    shinR: [[0, 0.03, 0, 0], [3, 0.03, 0, 0]],
+  };
+  const idlePos: Record<string, PosKey[]> = { hips: [[0, 0, HIP_Y, 0], [1.5, 0, HIP_Y - 0.008, 0], [3, 0, HIP_Y, 0]] };
+
+  // Цикл ходьбы: левая нога впереди в t=0, правая — в t=0.5.
+  const leg = (off: number): { thigh: RotKey[]; shin: RotKey[]; foot: RotKey[] } => {
+    const sh = (t: number) => (t + off) % 1;
+    const sortK = (k: RotKey[]) => {
+      const out = k.map(([t, x, y, z]) => [sh(t), x, y, z] as RotKey).sort((a, b) => a[0] - b[0]);
+      const first = out[0];
+      if (first[0] > 0) out.unshift([0, ...out[out.length - 1].slice(1)] as unknown as RotKey);
+      const last = out[out.length - 1];
+      if (last[0] < 1) out.push([1, ...out[0].slice(1)] as unknown as RotKey);
+      return out;
+    };
+    return {
+      thigh: sortK([[0, -0.5, 0, 0], [0.25, 0, 0, 0], [0.5, 0.45, 0, 0], [0.75, 0, 0, 0]]),
+      shin: sortK([[0, 0.1, 0, 0], [0.15, 0.25, 0, 0], [0.4, 0.12, 0, 0], [0.55, 0.35, 0, 0], [0.7, 1.15, 0, 0], [0.88, 0.35, 0, 0]]),
+      foot: sortK([[0, 0.25, 0, 0], [0.25, 0, 0, 0], [0.5, -0.35, 0, 0], [0.7, -0.4, 0, 0], [0.88, 0.1, 0, 0]]),
+    };
+  };
+  const L = leg(0);
+  const Rl = leg(0.5);
+  const walk: R = {
+    thighL: L.thigh, shinL: L.shin, footL: L.foot,
+    thighR: Rl.thigh, shinR: Rl.shin, footR: Rl.foot,
+    upperArmL: [[0, 0.38, 0, 0.08], [0.5, -0.38, 0, 0.08], [1, 0.38, 0, 0.08]],
+    upperArmR: [[0, -0.35, 0, -0.08], [0.5, 0.05, 0, -0.08], [1, -0.35, 0, -0.08]],
+    foreArmL: [[0, -0.25, 0, 0], [0.5, -0.5, 0, 0], [1, -0.25, 0, 0]],
+    foreArmR: [[0, -0.65, 0, 0], [1, -0.65, 0, 0]],
+    spine: [[0, 0.06, 0, 0], [1, 0.06, 0, 0]],
+    chest: [[0, 0, -0.1, 0], [0.5, 0, 0.1, 0], [1, 0, -0.1, 0]],
+    head: [[0, -0.04, 0.06, 0], [0.5, -0.04, -0.06, 0], [1, -0.04, 0.06, 0]],
+  };
+  const walkHips: RotKey[] = [[0, 0, 0.09, 0], [0.5, 0, -0.09, 0], [1, 0, 0.09, 0]];
+  const walkPos: Record<string, PosKey[]> = {
+    hips: [[0, 0, HIP_Y - 0.03, 0], [0.25, 0, HIP_Y + 0.015, 0], [0.5, 0, HIP_Y - 0.03, 0], [0.75, 0, HIP_Y + 0.015, 0], [1, 0, HIP_Y - 0.03, 0]],
+  };
+
+  const lunge = (tStrike: number, end: number): R => ({
+    thighL: [[0, 0, 0, 0], [tStrike, -0.45, 0, 0], [end, 0, 0, 0]],
+    shinL: [[0, 0.03, 0, 0], [tStrike, 0.35, 0, 0], [end, 0.03, 0, 0]],
+    thighR: [[0, 0, 0, 0], [tStrike, 0.3, 0, 0], [end, 0, 0, 0]],
+    shinR: [[0, 0.03, 0, 0], [tStrike, 0.15, 0, 0], [end, 0.03, 0, 0]],
+    upperArmL: [[0, 0.05, 0, 0.1], [tStrike, -0.5, 0, 0.25], [end, 0.05, 0, 0.1]],
+    foreArmL: [[0, -0.15, 0, 0], [tStrike, -0.7, 0, 0], [end, -0.15, 0, 0]],
+  });
+  const lungePos = (tStrike: number, end: number): Record<string, PosKey[]> => ({
+    hips: [[0, 0, HIP_Y, 0], [tStrike, 0, HIP_Y - 0.06, 0.08], [end, 0, HIP_Y, 0]],
+  });
+
+  const spear: R = {
+    ...lunge(0.25, 0.6),
+    upperArmR: [[0, -0.15, 0, -0.1], [0.12, 0.25, 0, -0.15], [0.25, -1.3, 0, 0], [0.45, -1.2, 0, 0], [0.6, -0.15, 0, -0.1]],
+    foreArmR: [[0, -0.65, 0, 0], [0.12, -1.05, 0, 0], [0.25, -0.05, 0, 0], [0.45, -0.1, 0, 0], [0.6, -0.65, 0, 0]],
+    weaponHolder: [[0, 0, 0, 0], [0.12, 1.9, 0, 0], [0.25, 2.12, 0, 0], [0.45, 2.0, 0, 0], [0.6, 0, 0, 0]],
+    chest: [[0, 0, 0, 0], [0.12, 0, -0.3, 0], [0.25, 0.12, 0.35, 0], [0.6, 0, 0, 0]],
+  };
+  const punch: R = {
+    ...lunge(0.22, 0.5),
+    upperArmR: [[0, -0.15, 0, -0.1], [0.1, 0.3, 0, -0.2], [0.22, -1.5, 0, 0], [0.5, -0.15, 0, -0.1]],
+    foreArmR: [[0, -0.65, 0, 0], [0.1, -1.6, 0, 0], [0.22, -0.05, 0, 0], [0.5, -0.65, 0, 0]],
+    chest: [[0, 0, 0, 0], [0.1, 0, -0.25, 0], [0.22, 0.1, 0.35, 0], [0.5, 0, 0, 0]],
+  };
+  const gun: R = {
+    upperArmR: [[0, -0.15, 0, -0.1], [0.12, -1.5, 0, 0], [0.18, -1.7, 0, 0], [0.4, -1.5, 0, 0], [0.55, -0.15, 0, -0.1]],
+    foreArmR: [[0, -0.65, 0, 0], [0.12, -0.05, 0, 0], [0.4, -0.05, 0, 0], [0.55, -0.65, 0, 0]],
+    chest: [[0, 0, 0, 0], [0.12, 0, 0.2, 0], [0.18, -0.05, 0.2, 0], [0.4, 0, 0.2, 0], [0.55, 0, 0, 0]],
+    head: [[0, 0, 0, 0], [0.12, 0, 0.15, 0], [0.55, 0, 0, 0]],
+  };
+  const hit: R = {
+    spine: [[0, 0, 0, 0], [0.1, -0.3, 0, 0], [0.35, 0, 0, 0]],
+    head: [[0, 0, 0, 0], [0.1, 0.25, 0, 0], [0.35, 0, 0, 0]],
+    upperArmL: [[0, 0.05, 0, 0.1], [0.1, -0.2, 0, 0.55], [0.35, 0.05, 0, 0.1]],
+    upperArmR: [[0, -0.15, 0, -0.1], [0.1, -0.3, 0, -0.55], [0.35, -0.15, 0, -0.1]],
+  };
+  const hitPos: Record<string, PosKey[]> = { hips: [[0, 0, HIP_Y, 0], [0.1, 0, HIP_Y - 0.02, -0.06], [0.35, 0, HIP_Y, 0]] };
+  const death: R = {
+    hips: [[0, 0, 0, 0], [0.3, -0.25, 0, 0], [0.8, -1.5708, 0, 0.1], [1.1, -1.5708, 0, 0.1]],
+    spine: [[0, 0, 0, 0], [0.3, 0.3, 0, 0], [0.8, 0.05, 0, 0], [1.1, 0.05, 0, 0]],
+    head: [[0, 0, 0, 0], [0.8, -0.25, 0.4, 0], [1.1, -0.25, 0.4, 0]],
+    thighL: [[0, 0, 0, 0], [0.3, -0.6, 0, 0], [0.8, -0.1, 0, 0.12], [1.1, -0.1, 0, 0.12]],
+    thighR: [[0, 0, 0, 0], [0.3, -0.5, 0, 0], [0.8, -0.3, 0, -0.08], [1.1, -0.3, 0, -0.08]],
+    shinL: [[0, 0, 0, 0], [0.3, 1.0, 0, 0], [0.8, 0.15, 0, 0], [1.1, 0.15, 0, 0]],
+    shinR: [[0, 0, 0, 0], [0.3, 0.9, 0, 0], [0.8, 0.6, 0, 0], [1.1, 0.6, 0, 0]],
+    upperArmL: [[0, 0, 0, 0.1], [0.8, -0.3, 0, 1.3], [1.1, -0.3, 0, 1.3]],
+    upperArmR: [[0, 0, 0, -0.1], [0.8, -0.6, 0, -1.1], [1.1, -0.6, 0, -1.1]],
+    foreArmL: [[0, 0, 0, 0], [0.8, -0.4, 0, 0], [1.1, -0.4, 0, 0]],
+  };
+  const deathPos: Record<string, PosKey[]> = {
+    hips: [[0, 0, HIP_Y, 0], [0.3, 0, 0.75, -0.08], [0.8, 0, 0.14, -0.35], [1.1, 0, 0.14, -0.35]],
+  };
+
+  return [
+    makeClip('idle', 3, idle as Record<string, RotKey[]>, idlePos),
+    makeClip('walk', 1, { ...(walk as Record<string, RotKey[]>), hips: walkHips }, walkPos),
+    makeClip('attack_spear', 0.6, spear as Record<string, RotKey[]>, lungePos(0.25, 0.6)),
+    makeClip('attack_punch', 0.5, punch as Record<string, RotKey[]>, lungePos(0.22, 0.5)),
+    makeClip('attack_gun', 0.55, gun as Record<string, RotKey[]>),
+    makeClip('hit', 0.35, hit as Record<string, RotKey[]>, hitPos),
+    makeClip('death', 1.1, death as Record<string, RotKey[]>, deathPos),
+  ];
+}
+
+let HUMAN_CLIPS: THREE.AnimationClip[] | null = null;
+
 export class HumanoidRig extends Rig {
   readonly height: number;
-  private hips = new THREE.Group();
-  private torso = new THREE.Group();
-  private head = new THREE.Group();
-  private legs: { hip: THREE.Group; knee: THREE.Group }[] = [];
-  private arms: { shoulder: THREE.Group; elbow: THREE.Group }[] = [];
-  private weaponHolder = new THREE.Group();
   private weapons: Record<WeaponVisual, THREE.Object3D | null>;
   private weapon: WeaponVisual = 'none';
+  private inner = new THREE.Group();
 
   constructor(look: HumanoidLook) {
     super();
     const scale = look.scale ?? 1;
-    const build = look.build ?? 1;
+    const b = look.build ?? 1;
     this.height = 1.8 * scale;
-    this.stride = 1.1;
-    const skin = std(look.skin, 0.65);
-    const cloth = std(look.cloth, 0.95);
-    const hair = std(look.hair, 0.9);
-    const leather = std('#5a3e2a', 0.85);
+    this.cycleDistance = 1.9;
 
-    this.body.scale.setScalar(scale);
-    this.body.add(this.hips);
-    this.hips.position.y = 0.95;
+    const skin = new THREE.Color(look.skin);
+    const cloth = new THREE.Color(look.cloth);
+    const hair = new THREE.Color(look.hair);
+    const top = look.top ? new THREE.Color(look.top) : null;
+    const leather = new THREE.Color('#4e3626');
+    const dark = new THREE.Color('#140d08');
+    const lips = skin.clone().multiplyScalar(0.8);
 
-    // Ноги с коленным суставом.
-    for (const side of [-1, 1]) {
-      const hip = new THREE.Group();
-      hip.position.set(side * 0.11, 0, 0);
-      hip.add(capsule(0.075 * build, 0.34, skin, -0.22));
-      const knee = new THREE.Group();
-      knee.position.y = -0.46;
-      knee.add(capsule(0.06 * build, 0.34, skin, -0.21));
-      const foot = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.07, 0.24), leather);
-      foot.position.set(0, -0.45, 0.05);
-      knee.add(foot);
-      hip.add(knee);
-      this.hips.add(hip);
-      this.legs.push({ hip, knee });
+    const sb = new SkinBuilder();
+    sb.bone('hips', null, V(0, 0.95, 0))
+      .bone('spine', 'hips', V(0, 1.1, 0))
+      .bone('chest', 'spine', V(0, 1.3, 0))
+      .bone('neck', 'chest', V(0, 1.5, 0))
+      .bone('head', 'neck', V(0, 1.6, 0.01));
+    for (const [s, x] of [['L', 1], ['R', -1]] as const) {
+      sb.bone(`upperArm${s}`, 'chest', V(0.19 * x * b, 1.45, 0))
+        .bone(`foreArm${s}`, `upperArm${s}`, V(0.22 * x * b, 1.17, 0))
+        .bone(`hand${s}`, `foreArm${s}`, V(0.24 * x * b, 0.94, 0.01))
+        .bone(`thigh${s}`, 'hips', V(0.1 * x * b, 0.93, 0))
+        .bone(`shin${s}`, `thigh${s}`, V(0.1 * x * b, 0.51, 0.01))
+        .bone(`foot${s}`, `shin${s}`, V(0.1 * x * b, 0.09, 0));
+    }
+
+    // Торс из трёх сегментов с плавными переходами весов.
+    sb.tube({
+      from: V(0, 0.83, 0), to: V(0, 1.1, 0), r0: 0.145 * b, r1: 0.135 * b, squash: [1.18, 0.82],
+      weights: (t) => (t < 0.6 ? [['hips', 1]] : blend('hips', 'spine', 0.6, 1.4)(t)),
+      color: (t) => (t < 0.62 ? cloth : skin),
+    });
+    sb.tube({
+      from: V(0, 1.08, 0), to: V(0, 1.32, 0), r0: 0.133 * b, r1: 0.15 * b, squash: [1.15, 0.8],
+      weights: (t) => (t < 0.3 ? blend('hips', 'spine', -0.3, 0.3)(t) : t > 0.75 ? blend('spine', 'chest', 0.75, 1.25)(t) : [['spine', 1]]),
+      color: () => skin,
+    });
+    sb.tube({
+      from: V(0, 1.3, 0), to: V(0, 1.53, 0), r0: 0.15 * b, r1: 0.09,
+      radius: (t) => (t < 0.55 ? lerp(0.15, 0.165, t / 0.55) * b : lerp(0.165 * b, 0.07, (t - 0.55) / 0.45)),
+      squash: [1.3, 0.78],
+      weights: (t) => (t < 0.25 ? blend('spine', 'chest', -0.25, 0.25)(t) : [['chest', 1]]),
+      color: () => skin,
+    });
+    if (top) {
+      sb.tube({
+        from: V(0, 1.12, 0), to: V(0, 1.47, 0), r0: 0.148 * b, r1: 0.17 * b, squash: [1.33, 0.82], caps: false, radial: 18,
+        weights: (t) => (t < 0.35 ? blend('spine', 'chest', 0, 0.35)(t) : [['chest', 1]]),
+        color: (_t, d) => (Math.abs(d.z) > 0.92 && d.z > 0 ? top.clone().multiplyScalar(0.7) : top),
+      });
     }
     // Набедренная повязка.
-    const loin = new THREE.Mesh(new THREE.CylinderGeometry(0.2 * build, 0.24 * build, 0.28, 12), cloth);
-    loin.position.y = -0.06;
-    this.hips.add(loin);
-    const flap = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.32, 0.03), cloth);
-    flap.position.set(0, -0.25, 0.19 * build);
-    this.hips.add(flap);
-
-    this.hips.add(this.torso);
-    const chest = capsule(0.17, 0.28, skin, 0.3);
-    chest.scale.set(1.25 * build, 1, 0.8 * build);
-    this.torso.add(chest);
-    if (look.top) {
-      const vest = new THREE.Mesh(new THREE.CylinderGeometry(0.23 * build, 0.21 * build, 0.42, 12, 1, true), std(look.top, 0.9));
-      vest.material.side = THREE.DoubleSide;
-      vest.scale.set(1.1, 1, 0.82);
-      vest.position.y = 0.33;
-      this.torso.add(vest);
+    sb.tube({
+      from: V(0, 0.99, 0), to: V(0, 0.72, 0.015), r0: 0.165 * b, r1: 0.19 * b, squash: [1.12, 0.92], caps: false, radial: 18,
+      weights: only('hips'), color: (t) => (t < 0.15 ? leather : cloth),
+    });
+    sb.tube({
+      from: V(0, 1.47, 0), to: V(0, 1.63, 0.01), r0: 0.052, r1: 0.048, caps: false,
+      weights: (t) => blend('chest', 'neck', -0.2, 0.5)(t).concat(t > 0.8 ? [['head', (t - 0.8) * 2]] : []),
+      color: () => skin,
+    });
+    // Голова: волосы сверху и сзади, лицо спереди.
+    sb.ellipsoid(V(0, 1.71, 0.01), V(0.1, 0.122, 0.112), [['head', 1]], (n) => (n.y > 0.25 || (n.z < -0.25 && n.y > -0.55) ? hair : skin), [20, 16]);
+    sb.ellipsoid(V(0, 1.68, 0.108), V(0.018, 0.03, 0.026), [['head', 1]], () => skin, [8, 6]);
+    sb.ellipsoid(V(0, 1.645, 0.095), V(0.03, 0.008, 0.012), [['head', 1]], () => lips, [8, 4]);
+    for (const x of [-1, 1]) {
+      sb.ellipsoid(V(0.036 * x, 1.715, 0.094), V(0.016, 0.011, 0.01), [['head', 1]], () => dark, [8, 6]);
+      sb.ellipsoid(V(0.036 * x, 1.735, 0.1), V(0.022, 0.006, 0.01), [['head', 1]], () => hair, [8, 4]);
+      sb.ellipsoid(V(0.098 * x, 1.7, 0), V(0.018, 0.032, 0.024), [['head', 1]], () => skin, [8, 6]);
     }
-    // Ремень через плечо.
-    const strap = new THREE.Mesh(new THREE.TorusGeometry(0.21 * build, 0.02, 4, 16), leather);
-    strap.scale.set(1.1, 1.5, 0.7);
-    strap.rotation.set(0, Math.PI / 2, 0.6);
-    strap.position.y = 0.32;
-    this.torso.add(strap);
+    if (look.beard) sb.ellipsoid(V(0, 1.61, 0.06), V(0.072, 0.085, 0.055), [['head', 1]], () => hair, [12, 10]);
 
-    // Голова.
-    this.head.position.y = 0.68;
-    this.torso.add(this.head);
-    const neck = capsule(0.055, 0.08, skin, -0.06);
-    this.head.add(neck);
-    const skull = new THREE.Mesh(new THREE.SphereGeometry(0.115, 16, 12), skin);
-    skull.scale.set(0.95, 1.1, 1);
-    skull.position.y = 0.08;
-    this.head.add(skull);
-    const hairMesh = new THREE.Mesh(new THREE.SphereGeometry(0.122, 16, 10, 0, Math.PI * 2, 0, Math.PI * 0.55), hair);
-    hairMesh.position.set(0, 0.1, -0.01);
-    hairMesh.rotation.x = -0.25;
-    this.head.add(hairMesh);
-    const nose = new THREE.Mesh(new THREE.ConeGeometry(0.02, 0.05, 5), skin);
-    nose.rotation.x = Math.PI / 2;
-    nose.position.set(0, 0.07, 0.115);
-    this.head.add(nose);
-    for (const sx of [-1, 1]) {
-      const eye = new THREE.Mesh(new THREE.SphereGeometry(0.014, 6, 4), std('#120c08', 0.3));
-      eye.position.set(sx * 0.04, 0.1, 0.1);
-      this.head.add(eye);
-    }
-    if (look.beard) {
-      const beard = new THREE.Mesh(new THREE.ConeGeometry(0.08, 0.2, 8), hair);
-      beard.rotation.x = Math.PI;
-      beard.position.set(0, -0.02, 0.06);
-      this.head.add(beard);
+    for (const [s, x] of [['L', 1], ['R', -1]] as const) {
+      const ua = `upperArm${s}`;
+      const fa = `foreArm${s}`;
+      const th = `thigh${s}`;
+      const sh = `shin${s}`;
+      sb.ellipsoid(V(0.185 * x * b, 1.45, 0), V(0.065 * b, 0.06, 0.06), [['chest', 0.5], [ua, 0.5]], () => (top ? top : skin), [10, 8]);
+      sb.tube({
+        from: V(0.19 * x * b, 1.45, 0), to: V(0.22 * x * b, 1.17, 0), r0: 0.054 * b, r1: 0.042 * b, rings: 5,
+        weights: (t) => (t < 0.2 ? blend('chest', ua, -0.2, 0.2)(t) : [[ua, 1]]),
+        color: () => skin,
+      });
+      sb.tube({
+        from: V(0.22 * x * b, 1.17, 0), to: V(0.24 * x * b, 0.96, 0.01), r0: 0.042 * b, r1: 0.032 * b, rings: 5,
+        weights: (t) => (t < 0.25 ? blend(ua, fa, -0.25, 0.25)(t) : [[fa, 1]]),
+        color: (t) => (t > 0.72 && t < 0.92 ? leather : skin),
+      });
+      sb.ellipsoid(V(0.245 * x * b, 0.9, 0.012), V(0.03, 0.055, 0.042), [[`hand${s}`, 1]], () => skin, [10, 8]);
+      sb.tube({
+        from: V(0.1 * x * b, 0.95, 0), to: V(0.1 * x * b, 0.51, 0.01), r0: 0.082 * b, r1: 0.056 * b,
+        weights: (t) => (t < 0.18 ? blend('hips', th, -0.18, 0.18)(t) : [[th, 1]]),
+        color: () => skin,
+      });
+      sb.tube({
+        from: V(0.1 * x * b, 0.51, 0.01), to: V(0.1 * x * b, 0.1, 0), r0: 0.054 * b, r1: 0.036 * b,
+        weights: (t) => (t < 0.22 ? blend(th, sh, -0.22, 0.22)(t) : [[sh, 1]]),
+        color: (t) => (t > 0.72 ? leather : skin),
+      });
+      sb.ellipsoid(V(0.1 * x * b, 0.05, 0.045), V(0.048, 0.042, 0.115), [[`foot${s}`, 1]], () => leather, [10, 8]);
     }
 
-    // Руки.
-    for (const side of [-1, 1]) {
-      const shoulder = new THREE.Group();
-      shoulder.position.set(side * 0.25 * build, 0.48, 0);
-      shoulder.rotation.z = side * 0.08;
-      shoulder.add(capsule(0.055 * build, 0.24, skin, -0.15));
-      const elbow = new THREE.Group();
-      elbow.position.y = -0.31;
-      elbow.add(capsule(0.048 * build, 0.22, skin, -0.14));
-      const band = new THREE.Mesh(new THREE.CylinderGeometry(0.056, 0.056, 0.06, 8), leather);
-      band.position.y = -0.2;
-      elbow.add(band);
-      shoulder.add(elbow);
-      this.torso.add(shoulder);
-      this.arms.push({ shoulder, elbow });
-    }
-    this.weaponHolder.position.y = -0.3;
-    this.arms[1].elbow.add(this.weaponHolder);
+    // Держатель оружия: анимируется клипами атаки, вложенная группа задаёт хват конкретного оружия.
+    const holder = new THREE.Group();
+    holder.name = 'weaponHolder';
+    holder.add(this.inner);
+    sb.attach('handR', holder, V(-0.245 * b, 0.9, 0.01));
 
-    // Оружие.
     const wood = std('#6a4a30', 0.85);
     const spear = new THREE.Group();
-    const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.022, 2.1, 6), wood);
+    const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.022, 2.1, 8), wood);
     shaft.position.y = 0.45;
     spear.add(shaft);
-    const tip = new THREE.Mesh(new THREE.ConeGeometry(0.04, 0.22, 4), std('#3a3634', 0.35, 0.3));
-    tip.position.y = 1.6;
+    const tip = new THREE.Mesh(new THREE.ConeGeometry(0.04, 0.24, 4), std('#3a3634', 0.35, 0.3));
+    tip.position.y = 1.62;
     spear.add(tip);
+    const wrap = new THREE.Mesh(new THREE.CylinderGeometry(0.026, 0.026, 0.12, 8), std('#4e3626', 0.9));
+    wrap.position.y = 1.45;
+    spear.add(wrap);
     const gun = new THREE.Group();
     const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.018, 0.3, 8), std('#3c3c3e', 0.4, 0.8));
-    barrel.position.y = -0.18;
+    barrel.position.y = -0.17;
     gun.add(barrel);
     const grip = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.12, 0.09), std('#4a3424', 0.7));
     grip.position.set(0, -0.02, -0.05);
     gun.add(grip);
     const staff = new THREE.Group();
-    const staffShaft = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.03, 1.8, 6), wood);
+    const staffShaft = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.03, 1.8, 8), wood);
     staffShaft.position.y = 0.35;
     staff.add(staffShaft);
-    const orb = new THREE.Mesh(new THREE.SphereGeometry(0.08, 8, 6), std('#e6dcc4', 0.6));
+    const orb = new THREE.Mesh(new THREE.SphereGeometry(0.08, 10, 8), std('#e6dcc4', 0.6));
     orb.position.y = 1.28;
     staff.add(orb);
     this.weapons = { none: null, spear, gun, staff };
     for (const w of [spear, gun, staff]) {
       w.visible = false;
-      this.weaponHolder.add(w);
+      w.traverse((o) => ((o as THREE.Mesh).isMesh ? (o.castShadow = true) : null));
+      this.inner.add(w);
     }
 
-    this.shadows();
+    const { mesh } = sb.build(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.72 }));
+    mesh.scale.setScalar(scale);
+    this.root.add(mesh);
+    HUMAN_CLIPS ??= humanClips();
+    this.setupAnimations(mesh, HUMAN_CLIPS);
   }
 
   setWeapon(w: WeaponVisual) {
     this.weapon = w;
     for (const [k, obj] of Object.entries(this.weapons)) if (obj) obj.visible = k === w;
+    // Копьё и посох держим вертикально при согнутом локте.
+    this.inner.rotation.x = w === 'spear' || w === 'staff' ? 0.8 : 0;
   }
 
-  protected pose() {
-    const b = this.moveBlend;
-    const s = Math.sin(this.phase);
-    const c = Math.cos(this.phase);
-    const atk = this.attackCurve();
-    const hit = this.hitCurve();
-    const breath = Math.sin(this.time * 1.8) * 0.015;
-
-    this.legs[0].hip.rotation.x = s * 0.55 * b;
-    this.legs[1].hip.rotation.x = -s * 0.55 * b;
-    this.legs[0].knee.rotation.x = Math.max(0, -c) * 0.9 * b;
-    this.legs[1].knee.rotation.x = Math.max(0, c) * 0.9 * b;
-    this.hips.position.y = 0.95 + Math.abs(c) * 0.04 * b - 0.03 * b;
-
-    this.torso.rotation.x = 0.06 * b + breath - hit * 0.3;
-    this.torso.rotation.y = s * 0.08 * b;
-    this.head.rotation.x = -0.05 * b + hit * 0.2;
-
-    const [left, right] = this.arms;
-    left.shoulder.rotation.x = -s * 0.5 * b;
-    left.elbow.rotation.x = -0.25 - 0.2 * b;
-
-    if (this.weapon === 'gun') {
-      // Прицеливание: рука вытянута вперёд, отдача при выстреле.
-      right.shoulder.rotation.x = lerp(s * 0.4 * b - 0.1, -1.5, atk > 0 ? 1 : 0) + atk * 0.25;
-      right.elbow.rotation.x = atk > 0 ? -0.05 : -0.35;
-      this.weaponHolder.rotation.x = 0;
-    } else if (this.weapon === 'spear' || this.weapon === 'staff') {
-      right.shoulder.rotation.x = lerp(-0.25 + s * 0.15 * b, -1.25, atk);
-      right.elbow.rotation.x = lerp(-0.55, -0.05, atk);
-      // При выпаде копьё разворачивается остриём к цели.
-      this.weaponHolder.rotation.x = lerp(0.8, Math.PI / 2 + 1.3, atk);
-      this.torso.rotation.y += atk * 0.35;
-    } else {
-      right.shoulder.rotation.x = lerp(s * 0.5 * b, -1.45, atk);
-      right.elbow.rotation.x = lerp(-0.25 - 0.2 * b, -0.05, atk);
-    }
-    this.torso.rotation.x += atk * 0.12;
-
-    if (this.deathT >= 0) {
-      const e = easeInOut(this.deathT);
-      this.body.rotation.x = -Math.PI / 2 * e;
-      this.body.position.y = 0.12 * e;
-      this.body.position.z = -0.3 * e;
-    }
+  protected attackClip() {
+    return this.weapon === 'gun' ? 'attack_gun' : this.weapon === 'spear' || this.weapon === 'staff' ? 'attack_spear' : 'attack_punch';
   }
 }
 
 // ─── Ящер (геккон) ──────────────────────────────────────────────────────────
 
+let LIZARD_CLIPS: THREE.AnimationClip[] | null = null;
+
+function lizardClips(): THREE.AnimationClip[] {
+  const Y = 0.36;
+  const tail = (dur: number, amp: number, n = 8): Record<string, RotKey[]> => {
+    const r: Record<string, RotKey[]> = {};
+    for (let i = 1; i <= 4; i++) r[`tail${i}`] = sineKeys(dur, 1, amp, -i * 0.7, 0, n, [0.04, 0, 0]);
+    return r;
+  };
+  const walkDur = 0.6;
+  const s = (phase: number) => sineKeys(walkDur, 1, 0.55, phase);
+  const lift = (phase: number) => sineKeys(walkDur, 0, 0.25, phase);
+  const walk = makeClip('walk', walkDur, {
+    ...tail(walkDur, 0.28),
+    // Диагональные пары лап движутся вместе.
+    flU: s(Math.PI), frU: s(Math.PI), hlU: s(0), hrU: s(0),
+    flL: lift(0), frL: lift(Math.PI), hlL: lift(Math.PI), hrL: lift(0),
+    body: sineKeys(walkDur, 1, 0.16, 0),
+    neck: sineKeys(walkDur, 1, -0.12, 0),
+  }, { body: sineKeys(walkDur, 1, 0, 0).map(([t]) => [t, 0, Y + 0.015 * Math.abs(Math.sin((t / walkDur) * Math.PI * 2)), 0]) as PosKey[] });
+  const idle = makeClip('idle', 2.4, {
+    ...tail(2.4, 0.12),
+    neck: [[0, 0, 0, 0], [0.8, -0.08, 0.15, 0], [1.6, 0.04, -0.1, 0], [2.4, 0, 0, 0]],
+    jaw: [[0, 0, 0, 0], [1.1, 0, 0, 0], [1.2, 0.12, 0, 0], [1.4, 0, 0, 0], [2.4, 0, 0, 0]],
+  }, { body: [[0, 0, Y, 0], [1.2, 0, Y + 0.012, 0], [2.4, 0, Y, 0]] });
+  const attack = makeClip('attack', 0.55, {
+    neck: [[0, 0, 0, 0], [0.15, -0.35, 0, 0], [0.28, 0.25, 0, 0], [0.55, 0, 0, 0]],
+    jaw: [[0, 0, 0, 0], [0.15, 0.7, 0, 0], [0.3, 0, 0, 0], [0.55, 0, 0, 0]],
+    body: [[0, 0, 0, 0], [0.15, -0.12, 0, 0], [0.28, 0.08, 0, 0], [0.55, 0, 0, 0]],
+  }, { body: [[0, 0, Y, 0], [0.15, 0, Y + 0.04, -0.06], [0.28, 0, Y, 0.2], [0.55, 0, Y, 0]] });
+  const hit = makeClip('hit', 0.35, {
+    body: [[0, 0, 0, 0], [0.1, 0.18, 0.2, 0], [0.35, 0, 0, 0]],
+    neck: [[0, 0, 0, 0], [0.1, -0.35, 0, 0], [0.35, 0, 0, 0]],
+  });
+  const death = makeClip('death', 0.9, {
+    body: [[0, 0, 0, 0], [0.4, 0, 0, 1.6], [0.9, 0, 0, Math.PI]],
+    neck: [[0, 0, 0, 0], [0.9, 0.4, 0.3, 0]],
+    jaw: [[0, 0, 0, 0], [0.9, 0.5, 0, 0]],
+    flU: [[0, 0, 0, 0], [0.9, 0, 0.3, 0.4]], frU: [[0, 0, 0, 0], [0.9, 0, -0.3, -0.4]],
+    ...tail(0.9, 0.05, 2),
+  }, { body: [[0, 0, Y, 0], [0.4, 0, Y + 0.2, 0], [0.9, 0, 0.2, 0]] });
+  return [idle, walk, attack, hit, death];
+}
+
 export class LizardRig extends Rig {
   readonly height: number;
-  private trunk = new THREE.Group();
-  private headG = new THREE.Group();
-  private jaw: THREE.Mesh;
-  private tail: THREE.Group[] = [];
-  private legs: THREE.Group[] = [];
 
   constructor(color: THREE.ColorRepresentation, belly: THREE.ColorRepresentation, scale = 1) {
     super();
     this.height = 0.7 * scale;
-    this.stride = 0.5;
-    const skin = std(color, 0.55);
-    skin.metalness = 0.05;
-    const bellyMat = std(belly, 0.7);
-    this.body.scale.setScalar(scale);
-    this.body.add(this.trunk);
-    this.trunk.position.y = 0.36;
+    this.cycleDistance = 0.9;
+    const top = new THREE.Color(color);
+    const bel = new THREE.Color(belly);
+    const stripe = top.clone().multiplyScalar(0.6);
+    // Спина в тёмных поперечных полосах, брюхо светлое.
+    const scaleCol = (z: number) => (d: THREE.Vector3) => (d.y < -0.35 ? bel : Math.sin(z * 22) > 0.6 && d.y > 0.2 ? stripe : top);
 
-    const torso = new THREE.Mesh(new THREE.SphereGeometry(0.3, 18, 12), skin);
-    torso.scale.set(0.95, 0.75, 1.7);
-    this.trunk.add(torso);
-    const bellyMesh = new THREE.Mesh(new THREE.SphereGeometry(0.28, 14, 10), bellyMat);
-    bellyMesh.scale.set(0.85, 0.6, 1.55);
-    bellyMesh.position.y = -0.06;
-    this.trunk.add(bellyMesh);
-    // Гребень вдоль спины.
-    for (let i = 0; i < 6; i++) {
-      const spike = new THREE.Mesh(new THREE.ConeGeometry(0.035, 0.12, 4), bellyMat);
-      spike.position.set(0, 0.22, -0.35 + i * 0.14);
-      spike.rotation.x = -0.4;
-      this.trunk.add(spike);
+    const sb = new SkinBuilder();
+    const Y = 0.36;
+    sb.bone('body', null, V(0, Y, 0))
+      .bone('chest', 'body', V(0, Y, 0.22))
+      .bone('neck', 'chest', V(0, Y + 0.04, 0.42))
+      .bone('head', 'neck', V(0, Y + 0.06, 0.56))
+      .bone('jaw', 'head', V(0, Y + 0.02, 0.58))
+      .bone('pelvis', 'body', V(0, Y, -0.22))
+      .bone('tail1', 'pelvis', V(0, Y - 0.01, -0.4))
+      .bone('tail2', 'tail1', V(0, Y - 0.04, -0.62))
+      .bone('tail3', 'tail2', V(0, Y - 0.08, -0.84))
+      .bone('tail4', 'tail3', V(0, Y - 0.12, -1.04));
+    const legs: [string, string, number, number][] = [['fl', 'chest', 1, 0.24], ['fr', 'chest', -1, 0.24], ['hl', 'pelvis', 1, -0.24], ['hr', 'pelvis', -1, -0.24]];
+    for (const [n, parent, x, z] of legs) {
+      sb.bone(`${n}U`, parent, V(0.15 * x, Y - 0.02, z)).bone(`${n}L`, `${n}U`, V(0.34 * x, Y - 0.1, z + 0.02));
     }
 
-    this.headG.position.set(0, 0.1, 0.52);
-    this.trunk.add(this.headG);
-    const head = new THREE.Mesh(new THREE.SphereGeometry(0.17, 14, 10), skin);
-    head.scale.set(1, 0.75, 1.5);
-    head.position.z = 0.12;
-    this.headG.add(head);
-    this.jaw = new THREE.Mesh(new THREE.SphereGeometry(0.13, 10, 8), bellyMat);
-    this.jaw.scale.set(1, 0.4, 1.5);
-    this.jaw.position.set(0, -0.08, 0.12);
-    this.headG.add(this.jaw);
-    for (const sx of [-1, 1]) {
-      const eye = new THREE.Mesh(new THREE.SphereGeometry(0.045, 10, 8), new THREE.MeshStandardMaterial({ color: '#f2c230', emissive: '#7a5200', emissiveIntensity: 0.6, roughness: 0.2 }));
-      eye.position.set(sx * 0.11, 0.06, 0.18);
-      this.headG.add(eye);
-      const pupil = new THREE.Mesh(new THREE.SphereGeometry(0.02, 6, 4), std('#000', 0.2));
-      pupil.position.set(sx * 0.135, 0.065, 0.205);
-      this.headG.add(pupil);
-    }
-
-    // Хвост — цепочка сегментов, каждый повёрнут относительно предыдущего.
-    let parent: THREE.Object3D = this.trunk;
-    let z = -0.45;
-    for (let i = 0; i < 5; i++) {
-      const seg = new THREE.Group();
-      seg.position.z = z;
-      const r = 0.14 * (1 - i * 0.17);
-      const m = new THREE.Mesh(new THREE.CapsuleGeometry(r, 0.2, 3, 8), skin);
-      m.rotation.x = Math.PI / 2;
-      m.position.z = -0.14;
-      seg.add(m);
-      parent.add(seg);
-      this.tail.push(seg);
-      parent = seg;
-      z = -0.26;
-    }
-
-    // Лапы, расставленные в стороны.
-    for (const [sx, sz] of [[-1, 1], [1, 1], [-1, -1], [1, -1]]) {
-      const leg = new THREE.Group();
-      leg.position.set(sx * 0.22, -0.05, sz * 0.28);
-      const upper = new THREE.Mesh(new THREE.CapsuleGeometry(0.05, 0.16, 3, 6), skin);
-      upper.rotation.z = sx * 1.1;
-      upper.position.set(sx * 0.1, -0.04, 0);
-      leg.add(upper);
-      const lower = new THREE.Mesh(new THREE.CapsuleGeometry(0.04, 0.16, 3, 6), skin);
-      lower.position.set(sx * 0.2, -0.18, 0);
-      leg.add(lower);
-      const foot = new THREE.Mesh(new THREE.SphereGeometry(0.06, 6, 4), skin);
-      foot.scale.set(1.2, 0.4, 1.5);
-      foot.position.set(sx * 0.21, -0.28, 0.04);
-      leg.add(foot);
-      this.trunk.add(leg);
-      this.legs.push(leg);
-    }
-    this.shadows();
-  }
-
-  protected pose() {
-    const b = this.moveBlend;
-    const s = Math.sin(this.phase);
-    const atk = this.attackCurve();
-    const hit = this.hitCurve();
-    // Диагональные пары лап двигаются вместе.
-    this.legs[0].rotation.y = s * 0.6 * b;
-    this.legs[3].rotation.y = s * 0.6 * b;
-    this.legs[1].rotation.y = -s * 0.6 * b;
-    this.legs[2].rotation.y = -s * 0.6 * b;
-    this.trunk.rotation.y = s * 0.15 * b;
-    this.trunk.position.y = 0.36 + Math.sin(this.time * 2) * 0.01;
-    this.tail.forEach((seg, i) => {
-      seg.rotation.y = Math.sin(this.time * 2.2 - i * 0.7 + this.phase) * (0.12 + 0.15 * b);
-      seg.rotation.x = 0.06;
+    // Туловище — одна трубка с весами pelvis → body → chest → neck.
+    const bodyW = (t: number): [string, number][] => {
+      const z = lerp(-0.42, 0.5, t);
+      if (z < -0.2) return [['pelvis', 1]];
+      if (z < 0) return blend('pelvis', 'body', -0.2, 0)(z);
+      if (z < 0.22) return blend('body', 'chest', 0, 0.22)(z);
+      if (z < 0.4) return [['chest', 1]];
+      return blend('chest', 'neck', 0.4, 0.5)(z);
+    };
+    sb.tube({
+      from: V(0, Y, -0.42), to: V(0, Y + 0.03, 0.5), r0: 0.16, r1: 0.12, rings: 12, radial: 16, squash: [1.15, 0.78],
+      radius: (t) => 0.16 + Math.sin(t * Math.PI) * 0.11 - t * 0.05,
+      weights: bodyW,
+      color: (t, d) => scaleCol(lerp(-0.42, 0.5, t))(d),
     });
-    this.headG.position.z = 0.52 + atk * 0.25;
-    this.headG.rotation.x = -atk * 0.3 + hit * 0.4 + Math.sin(this.time * 0.7) * 0.05;
-    this.jaw.rotation.x = atk * 0.5;
-    this.trunk.rotation.x = -atk * 0.1 + hit * 0.15;
-    if (this.deathT >= 0) {
-      const e = easeInOut(this.deathT);
-      this.body.rotation.z = Math.PI * e;
-      this.body.position.y = 0.72 * e * this.body.scale.y;
+    sb.tube({
+      from: V(0, Y + 0.04, 0.42), to: V(0, Y + 0.06, 0.58), r0: 0.12, r1: 0.11, caps: false,
+      weights: blend('neck', 'head', 0.2, 1), color: (_t, d) => (d.y < -0.35 ? bel : top),
+    });
+    sb.ellipsoid(V(0, Y + 0.08, 0.68), V(0.13, 0.095, 0.18), [['head', 1]], (n) => (n.y < -0.4 ? bel : top), [16, 12]);
+    sb.ellipsoid(V(0, Y + 0.0, 0.68), V(0.1, 0.045, 0.15), [['jaw', 1]], () => bel, [12, 8]);
+    // Хвост по цепочке костей.
+    const tailPts = [V(0, Y, -0.38), V(0, Y - 0.01, -0.4), V(0, Y - 0.04, -0.62), V(0, Y - 0.08, -0.84), V(0, Y - 0.12, -1.04), V(0, Y - 0.15, -1.22)];
+    const tailBones = ['pelvis', 'tail1', 'tail2', 'tail3', 'tail4'];
+    for (let i = 1; i < 5; i++) {
+      const r0 = 0.14 * (1 - (i - 1) * 0.22);
+      const r1 = 0.14 * (1 - i * 0.22) + 0.012;
+      sb.tube({
+        from: tailPts[i], to: tailPts[i + 1], r0, r1, rings: 4, squash: [1.05, 0.85], caps: i === 4,
+        weights: (t) => (t < 0.3 ? blend(tailBones[i - 1], tailBones[i], -0.3, 0.3)(t) : [[tailBones[i], 1]]),
+        color: (_t, d) => scaleCol(tailPts[i].z)(d),
+      });
     }
+    for (const [n, parent, x, z] of legs) {
+      sb.tube({
+        from: V(0.13 * x, Y - 0.02, z), to: V(0.34 * x, Y - 0.1, z + 0.02), r0: 0.065, r1: 0.05, rings: 4,
+        weights: (t) => (t < 0.25 ? blend(parent, `${n}U`, -0.25, 0.25)(t) : [[`${n}U`, 1]]),
+        color: (_t, d) => (d.y < -0.3 ? bel : top),
+      });
+      sb.tube({
+        from: V(0.34 * x, Y - 0.1, z + 0.02), to: V(0.37 * x, Y - 0.33, z + 0.04), r0: 0.048, r1: 0.04, rings: 4,
+        weights: (t) => (t < 0.25 ? blend(`${n}U`, `${n}L`, -0.25, 0.25)(t) : [[`${n}L`, 1]]),
+        color: () => top,
+      });
+      sb.ellipsoid(V(0.38 * x, Y - 0.345, z + 0.08), V(0.07, 0.025, 0.08), [[`${n}L`, 1]], () => bel, [8, 6]);
+    }
+    const eyeMat = new THREE.MeshStandardMaterial({ color: '#f2c230', emissive: '#7a5200', emissiveIntensity: 0.7, roughness: 0.15 });
+    for (const x of [-1, 1]) {
+      const eye = new THREE.Mesh(new THREE.SphereGeometry(0.042, 12, 10), eyeMat);
+      const pupil = new THREE.Mesh(new THREE.SphereGeometry(0.019, 6, 6), std('#000', 0.2));
+      pupil.scale.set(0.5, 1.2, 1);
+      pupil.position.set(x * 0.02, 0, 0.03);
+      eye.add(pupil);
+      sb.attach('head', eye, V(x * 0.1, Y + 0.13, 0.72));
+    }
+    // Гребень вдоль спины.
+    for (let i = 0; i < 7; i++) {
+      const z = -0.3 + i * 0.12;
+      const spike = new THREE.Mesh(new THREE.ConeGeometry(0.03, 0.1, 4), std(belly, 0.7));
+      spike.rotation.x = -0.4;
+      sb.attach(z < -0.1 ? 'pelvis' : z < 0.15 ? 'body' : 'chest', spike, V(0, Y + 0.22 - Math.abs(z) * 0.08, z));
+    }
+
+    const { mesh } = sb.build(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.5, metalness: 0.05 }));
+    mesh.scale.setScalar(scale);
+    this.root.add(mesh);
+    LIZARD_CLIPS ??= lizardClips();
+    this.setupAnimations(mesh, LIZARD_CLIPS);
   }
 }
 
@@ -421,112 +566,129 @@ export interface QuadLook {
   tailLen: number;
 }
 
+function quadClips(look: QuadLook): THREE.AnimationClip[] {
+  const by = look.legLen + look.bodyR * 0.6;
+  const walkDur = 0.9;
+  const swing = (phase: number) => sineKeys(walkDur, 0, 0.45, phase);
+  const knee = (phase: number) => sineKeys(walkDur, 0, 0.3, phase, 0.3);
+  const necks = (dur: number, amp: number, base = 0.1): Record<string, RotKey[]> => {
+    const r: Record<string, RotKey[]> = {};
+    for (let h = 0; h < look.heads; h++) {
+      r[`neck${h}`] = [[0, base, 0, 0], [dur * 0.3, base + amp, (h ? -1 : 1) * 0.15, 0], [dur * 0.7, base - amp * 0.5, (h ? 1 : -1) * 0.1, 0], [dur, base, 0, 0]];
+    }
+    return r;
+  };
+  const tail = (dur: number, amp: number) => sineKeys(dur, 2, amp, 0, 0, 8, [0.5, 0, 0]);
+  return [
+    makeClip('idle', 4, { ...necks(4, 0.2), tail: tail(4, 0.25) }, { body: [[0, 0, by, 0], [2, 0, by - 0.01, 0], [4, 0, by, 0]] }),
+    makeClip('walk', walkDur, {
+      legFL: swing(0), legHR: swing(0), legFR: swing(Math.PI), legHL: swing(Math.PI),
+      shinFL: knee(-1.2), shinHR: knee(-1.2), shinFR: knee(Math.PI - 1.2), shinHL: knee(Math.PI - 1.2),
+      ...necks(walkDur, 0.06, 0.05), tail: tail(walkDur, 0.2),
+    }, { body: sineKeys(walkDur, 1, 0, 0).map(([t]) => [t, 0, by + 0.025 * Math.abs(Math.sin((t / walkDur) * Math.PI * 2)), 0]) as PosKey[] }),
+    makeClip('attack', 0.6, necks(0.6, 0.5, 0.1)),
+    makeClip('hit', 0.35, { body: [[0, 0, 0, 0], [0.1, -0.1, 0, 0.1], [0.35, 0, 0, 0]] }),
+    makeClip('death', 1, {
+      body: [[0, 0, 0, 0], [0.5, 0, 0, 0.6], [1, 0, 0, Math.PI / 2]],
+      legFL: [[0, 0, 0, 0], [1, -0.3, 0, 0]], legHL: [[0, 0, 0, 0], [1, 0.3, 0, 0]],
+      ...necks(1, 0.3, 0.3),
+    }, { body: [[0, 0, by, 0], [0.5, 0, by * 0.85, 0], [1, 0, look.bodyR * 1.05, 0]] }),
+  ];
+}
+
 export class QuadrupedRig extends Rig {
   readonly height: number;
-  private trunk = new THREE.Group();
-  private legs: THREE.Group[] = [];
-  private heads: THREE.Group[] = [];
-  private tailG = new THREE.Group();
+  private tailBone: THREE.Bone;
   wag = 0;
 
   constructor(look: QuadLook) {
     super();
-    const main = std(look.color, 0.85);
-    const sec = std(look.secondary, 0.8);
-    this.height = look.legLen + look.bodyR * 2;
-    this.stride = look.legLen * 1.2;
-    this.body.add(this.trunk);
-    this.trunk.position.y = look.legLen + look.bodyR * 0.6;
+    const main = new THREE.Color(look.color);
+    const sec = new THREE.Color(look.secondary);
+    const R = look.bodyR;
+    const BL = look.bodyLen;
+    const LL = look.legLen;
+    this.height = LL + R * 2;
+    this.cycleDistance = LL * 3.2;
+    const by = LL + R * 0.6;
+    // Пятнистая шкура.
+    const hide = (p: number, d: THREE.Vector3) => (d.y < -0.5 ? sec : Math.sin(p * 9 + d.x * 4) > 0.75 ? sec.clone().lerp(main, 0.5) : main);
 
-    const torso = new THREE.Mesh(new THREE.CapsuleGeometry(look.bodyR, look.bodyLen, 6, 14), main);
-    torso.rotation.x = Math.PI / 2;
-    this.trunk.add(torso);
-    const belly = new THREE.Mesh(new THREE.SphereGeometry(look.bodyR * 0.9, 12, 8), sec);
-    belly.scale.set(0.9, 0.6, look.bodyLen / look.bodyR * 0.55);
-    belly.position.y = -look.bodyR * 0.35;
-    this.trunk.add(belly);
-
-    const hz = look.bodyLen / 2 + look.bodyR * 0.6;
+    const sb = new SkinBuilder();
+    sb.bone('body', null, V(0, by, 0))
+      .bone('front', 'body', V(0, by, BL * 0.35))
+      .bone('rear', 'body', V(0, by, -BL * 0.35))
+      .bone('tail', 'rear', V(0, by + R * 0.35, -BL / 2 - R * 0.75));
+    const neckBase = (h: number) => V(look.heads === 2 ? (h ? -1 : 1) * R * 0.42 : 0, by + R * 0.3, BL / 2 + R * 0.45);
     for (let h = 0; h < look.heads; h++) {
-      const neck = new THREE.Group();
-      const hx = look.heads === 2 ? (h ? 1 : -1) * look.bodyR * 0.45 : 0;
-      neck.position.set(hx, look.bodyR * 0.3, hz);
-      neck.rotation.y = look.heads === 2 ? (h ? -0.25 : 0.25) : 0;
-      const neckMesh = new THREE.Mesh(new THREE.CapsuleGeometry(look.bodyR * 0.32, look.bodyR * 0.6, 4, 8), main);
-      neckMesh.rotation.x = Math.PI / 2 - 0.6;
-      neckMesh.position.set(0, look.bodyR * 0.2, look.bodyR * 0.3);
-      neck.add(neckMesh);
-      const head = new THREE.Mesh(new THREE.SphereGeometry(look.bodyR * 0.42, 12, 10), main);
-      head.scale.set(0.85, 0.85, 1.4);
-      head.position.set(0, look.bodyR * 0.5, look.bodyR * 0.75);
-      neck.add(head);
-      const snout = new THREE.Mesh(new THREE.SphereGeometry(look.bodyR * 0.26, 10, 8), sec);
-      snout.scale.set(1, 0.8, 1);
-      snout.position.set(0, look.bodyR * 0.4, look.bodyR * 1.25);
-      neck.add(snout);
-      for (const sx of [-1, 1]) {
-        const eye = new THREE.Mesh(new THREE.SphereGeometry(look.bodyR * 0.06, 6, 4), std('#0c0806', 0.3));
-        eye.position.set(sx * look.bodyR * 0.24, look.bodyR * 0.66, look.bodyR * 0.98);
-        neck.add(eye);
+      const nb = neckBase(h);
+      sb.bone(`neck${h}`, 'front', nb).bone(`head${h}`, `neck${h}`, nb.clone().add(V(0, R * 0.45, R * 0.55)));
+    }
+    const legSpots: [string, string, number, number][] = [['FL', 'front', 1, BL * 0.42], ['FR', 'front', -1, BL * 0.42], ['HL', 'rear', 1, -BL * 0.42], ['HR', 'rear', -1, -BL * 0.42]];
+    for (const [n, parent, x, z] of legSpots) {
+      sb.bone(`leg${n}`, parent, V(x * R * 0.55, by - R * 0.3, z)).bone(`shin${n}`, `leg${n}`, V(x * R * 0.55, by - R * 0.3 - LL * 0.5, z));
+    }
+
+    sb.tube({
+      from: V(0, by, -BL / 2 - R * 0.2), to: V(0, by + R * 0.08, BL / 2 + R * 0.2), r0: R * 0.85, r1: R * 0.9, rings: 10, radial: 18,
+      radius: (t) => R * (0.82 + 0.18 * Math.sin(t * Math.PI)),
+      squash: [0.92, 1],
+      weights: (t) => (t < 0.35 ? [['rear', 1]] : t < 0.65 ? blend('rear', 'front', 0.35, 0.65)(t) : [['front', 1]]),
+      color: (t, d) => hide(t, d),
+    });
+    for (let h = 0; h < look.heads; h++) {
+      const nb = neckBase(h);
+      const hp = nb.clone().add(V(0, R * 0.45, R * 0.55));
+      sb.tube({
+        from: nb.clone().add(V(0, -R * 0.15, -R * 0.3)), to: hp, r0: R * 0.38, r1: R * 0.3, rings: 5,
+        weights: (t) => (t < 0.3 ? blend('front', `neck${h}`, 0, 0.3)(t) : t > 0.8 ? blend(`neck${h}`, `head${h}`, 0.8, 1.1)(t) : [[`neck${h}`, 1]]),
+        color: (_t, d) => (d.y < -0.4 ? sec : main),
+      });
+      sb.ellipsoid(hp.clone().add(V(0, R * 0.05, R * 0.18)), V(R * 0.36, R * 0.36, R * 0.5), [[`head${h}`, 1]], (n) => (n.y < -0.6 ? sec : main), [14, 10]);
+      sb.ellipsoid(hp.clone().add(V(0, -R * 0.05, R * 0.62)), V(R * 0.26, R * 0.22, R * 0.22), [[`head${h}`, 1]], () => sec, [12, 8]);
+      for (const x of [-1, 1]) {
+        sb.ellipsoid(hp.clone().add(V(x * R * 0.22, R * 0.17, R * 0.42)), V(R * 0.05, R * 0.05, R * 0.04), [[`head${h}`, 1]], () => new THREE.Color('#0c0806'), [6, 5]);
         if (look.horns) {
-          const horn = new THREE.Mesh(new THREE.ConeGeometry(look.bodyR * 0.08, look.bodyR * 0.6, 6), std('#e0d6bc', 0.6));
-          horn.position.set(sx * look.bodyR * 0.36, look.bodyR * 0.85, look.bodyR * 0.6);
-          horn.rotation.z = -sx * 1.0;
-          neck.add(horn);
+          const horn = new THREE.Mesh(new THREE.ConeGeometry(R * 0.08, R * 0.65, 8), std('#e0d6bc', 0.55));
+          horn.rotation.z = -x * 1.1;
+          sb.attach(`head${h}`, horn, hp.clone().add(V(x * R * 0.38, R * 0.35, R * 0.05)));
         }
         if (look.ears) {
-          const ear = new THREE.Mesh(new THREE.ConeGeometry(look.bodyR * 0.14, look.bodyR * 0.4, 4), main);
-          ear.position.set(sx * look.bodyR * 0.25, look.bodyR * 0.95, look.bodyR * 0.6);
-          ear.rotation.z = -sx * 0.3;
-          neck.add(ear);
+          const ear = new THREE.Mesh(new THREE.ConeGeometry(R * 0.14, R * 0.42, 4), std(look.color, 0.9));
+          ear.rotation.z = -x * 0.3;
+          sb.attach(`head${h}`, ear, hp.clone().add(V(x * R * 0.24, R * 0.42, R * 0.02)));
         }
       }
-      this.trunk.add(neck);
-      this.heads.push(neck);
     }
-
-    for (const [sx, sz] of [[-1, 1], [1, 1], [-1, -1], [1, -1]]) {
-      const leg = new THREE.Group();
-      leg.position.set(sx * look.bodyR * 0.55, -look.bodyR * 0.3, sz * look.bodyLen * 0.42);
-      const m = new THREE.Mesh(new THREE.CapsuleGeometry(look.bodyR * 0.17, look.legLen * 0.8, 3, 8), main);
-      m.position.y = -look.legLen * 0.5;
-      leg.add(m);
-      const hoof = new THREE.Mesh(new THREE.CylinderGeometry(look.bodyR * 0.16, look.bodyR * 0.2, look.legLen * 0.12, 8), sec);
-      hoof.position.y = -look.legLen + look.legLen * 0.05 - look.bodyR * 0.1;
-      leg.add(hoof);
-      this.trunk.add(leg);
-      this.legs.push(leg);
+    for (const [n, parent, x, z] of legSpots) {
+      const top = V(x * R * 0.55, by - R * 0.1, z);
+      const knee = V(x * R * 0.55, by - R * 0.3 - LL * 0.5, z);
+      const foot = V(x * R * 0.55, R * 0.05, z);
+      sb.tube({
+        from: top, to: knee, r0: R * 0.24, r1: R * 0.16, rings: 4,
+        weights: (t) => (t < 0.25 ? blend(parent, `leg${n}`, 0, 0.25)(t) : [[`leg${n}`, 1]]),
+        color: () => main,
+      });
+      sb.tube({
+        from: knee, to: foot, r0: R * 0.15, r1: R * 0.14, rings: 4,
+        weights: (t) => (t < 0.2 ? blend(`leg${n}`, `shin${n}`, -0.2, 0.2)(t) : [[`shin${n}`, 1]]),
+        color: (t) => (t > 0.82 ? sec.clone().multiplyScalar(0.6) : main),
+      });
     }
+    const tailTop = V(0, by + R * 0.35, -BL / 2 - R * 0.75);
+    sb.tube({
+      from: tailTop, to: tailTop.clone().add(V(0, -look.tailLen * 0.8, -look.tailLen * 0.4)), r0: R * 0.09, r1: R * 0.05, rings: 4,
+      weights: (t) => (t < 0.15 ? blend('rear', 'tail', -0.15, 0.15)(t) : [['tail', 1]]),
+      color: (t) => (t > 0.75 ? sec : main),
+    });
 
-    this.tailG.position.set(0, look.bodyR * 0.4, -look.bodyLen / 2 - look.bodyR * 0.7);
-    const tail = new THREE.Mesh(new THREE.CapsuleGeometry(look.bodyR * 0.08, look.tailLen, 3, 6), main);
-    tail.position.y = -look.tailLen * 0.4;
-    tail.position.z = -look.tailLen * 0.15;
-    this.tailG.rotation.x = 0.5;
-    this.tailG.add(tail);
-    this.trunk.add(this.tailG);
-    this.shadows();
+    const { mesh, bone } = sb.build(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85 }));
+    this.tailBone = bone('tail');
+    this.root.add(mesh);
+    this.setupAnimations(mesh, quadClips(look));
   }
 
-  protected pose() {
-    const b = this.moveBlend;
-    const s = Math.sin(this.phase);
-    const atk = this.attackCurve();
-    this.legs[0].rotation.x = s * 0.5 * b;
-    this.legs[3].rotation.x = s * 0.5 * b;
-    this.legs[1].rotation.x = -s * 0.5 * b;
-    this.legs[2].rotation.x = -s * 0.5 * b;
-    this.heads.forEach((h, i) => {
-      // Головы брамина живут своей жизнью.
-      h.rotation.x = Math.sin(this.time * 0.6 + i * 2) * 0.15 + 0.1 - atk * 0.4;
-      h.rotation.z = Math.sin(this.time * 0.4 + i * 3) * 0.1;
-    });
-    this.tailG.rotation.z = Math.sin(this.time * (4 + this.wag * 10)) * (0.25 + this.wag * 0.5);
-    this.trunk.rotation.x = -Math.abs(s) * 0.03 * b;
-    if (this.deathT >= 0) {
-      const e = easeInOut(this.deathT);
-      this.body.rotation.z = (Math.PI / 2) * e;
-      this.body.position.y = this.trunk.position.y * 0.3 * e;
-    }
+  protected post() {
+    if (this.wag > 0 && !this.isDead) this.tailBone.rotateY(Math.sin(this.time * (6 + this.wag * 10)) * this.wag * 0.6);
   }
 }
