@@ -1,5 +1,5 @@
 import { Actor, type ActorDef } from '../entities/actor';
-import { HumanoidRig, LizardRig, QuadrupedRig, TurretRig, RobotRig, type HumanoidLook, type WeaponVisual } from '../entities/rigs';
+import { HumanoidRig, LizardRig, QuadrupedRig, TurretRig, RobotRig, WanamingoRig, type HumanoidLook, type WeaponVisual } from '../entities/rigs';
 import type { WeaponStats } from './items';
 
 export const ATTACKS: Record<string, WeaponStats> = {
@@ -238,5 +238,16 @@ export function slag(id: string, name: string, variant: number, def: Partial<Act
   return human(id, name, looks[variant % 3], variant === 0 ? 'staff' : 'spear', {
     dialogue: 'slag', hp: 28, ap: 7, ac: 6, skill: 55, attack: ATTACKS.club, xp: 110, sequence: 7, speed: 3.3,
     tag: 'slags', wanderRadius: 3, detectRadius: 0, loot: [['caps', 0, 15], ['powder', 0, 1]], ...def,
+  });
+}
+
+/** Ванаминго из шахт Реддинга. Королева крупнее и злее. */
+export function wanamingo(id: string, queen = false): Actor {
+  return new Actor({
+    id, name: queen ? 'Королева ванаминго' : 'Ванаминго', faction: 'hostile', rig: new WanamingoRig(queen ? 1.45 : 1),
+    hp: queen ? 130 : 48, ap: queen ? 9 : 8, ac: queen ? 14 : 10, skill: queen ? 75 : 62, speed: queen ? 3.4 : 3.8,
+    attack: { skill: 'unarmed', dmg: queen ? [10, 22] : [5, 13], ap: 4, range: queen ? 2.2 : 1.8, melee: true, visual: 'none' },
+    xp: queen ? 1200 : 300, sequence: 9, dt: queen ? 4 : 2, dr: queen ? 0.3 : 0.15, tag: 'wanamingo',
+    wanderRadius: 4, detectRadius: 9, loot: [['wanaSample', 0, 1]],
   });
 }

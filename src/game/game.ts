@@ -1005,6 +1005,10 @@ export class Game {
       const n = randInt(min, max);
       if (n > 0) this.giveItem(id, n);
     }
+    if (target.id === 'wanaQueen') {
+      this.advanceQuest('wanamingo', 1);
+      this.ui.banner('КОРОЛЕВА МЕРТВА', 2.5);
+    }
     if (target.id === 'hen' && this.flags.has('slagsHostile')) {
       this.flags.add('karlHome');
       this.advanceQuest('ghostfarm', 2);
@@ -1125,6 +1129,16 @@ export class Game {
     const sci = this.char.skill('science');
     const card = this.inv.count('keycard') > 0;
     switch (it.id) {
+      case 'kokoweef':
+        this.enterLocation(LOCATIONS.kokoweef, 'world');
+        this.ui.log('Вы отдираете доски и спускаетесь в штольню. Пахнет сыростью и чем-то кислым.', 'warn');
+        break;
+      case 'wanaEggs':
+        this.flags.add('eggsDestroyed');
+        this.addXp(300);
+        this.ui.log('Вы давите яйца одно за другим. Зелёная жижа шипит на камнях.', 'good');
+        this.removeFromWorld('wanaEggs');
+        break;
       case 'ghostHatch':
         if (this.flags.has('slagsMet')) {
           this.ui.log(this.flags.has('slagsHostile') ? 'Из люка тянет сыростью. Внизу тихо.' : 'Люк в туннели слагов. Внизу горят огоньки.');
@@ -1472,6 +1486,7 @@ export class Game {
       : 'В войне семей Луиджи Морелли пал. Карвер правил Нью-Рино железной рукой и помнил, кому обязан короной.');
     else if (f.has('sidedMorelli')) slides.push('Без бухгалтерии Карвер быстро пал. Нью-Рино стал вотчиной семьи Морелли — и ещё на шаг ближе к тому, чтобы стать столицей пороков всей пустоши.');
     else if (f.has('sidedCarver')) slides.push('Семья Карвер вернула свои книги и вытеснила Морелли. Новый порядок в Нью-Рино оказался ничуть не лучше старого.');
+    if (this.quests.wanamingo?.state === 'rewarded') slides.push('Шахта Кокавиф снова давала золото. Реддинг разбогател, и на главной улице поставили памятник тому, кто спустился к королеве ванаминго.');
     if (f.has('modocPeace')) slides.push('Модок и слаги стали одним городом: днём — поля, ночью — кузни под землёй. На свадьбе Карла и Ребекки гуляли обе стороны.');
     else if (f.has('karlHome')) slides.push('Ферма призраков опустела навсегда. Карл так и не простил спасителя и однажды ушёл в пустошь один.');
     if (f.has('carOwned')) slides.push('«Хайвеймен» ещё долго колесил по дорогам пустоши. Смитти до старости хвастал, что это он поставил ему сердце.');
@@ -1547,6 +1562,11 @@ export class Game {
       if (this.quests.boxing) this.quests.boxing.state = 'rewarded';
       this.ui.banner('ЧЕМПИОН НЬЮ-РИНО', 2.5);
     }
+  }
+
+  /** Выход из шахты Кокавиф — обратно в Реддинг, к копру. */
+  leaveMine() {
+    this.enterLocation(LOCATIONS.redding, 'mine');
   }
 
   /** Слаги нападают: Карла придётся забирать силой. */

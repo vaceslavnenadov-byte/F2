@@ -915,3 +915,118 @@ export class RobotRig extends Rig {
     this.setupAnimations(this.root, ROBOT_CLIPS);
   }
 }
+
+let WANAMINGO_CLIPS: THREE.AnimationClip[] | null = null;
+
+/** Ванаминго: слизистая тварь из шахт — сгорбленное тело, четыре лапы, длинные руки-косы и вытянутая голова со жвалами. */
+export class WanamingoRig extends Rig {
+  readonly height = 1.7;
+
+  constructor(scale = 1) {
+    super();
+    this.cycleDistance = 1.8;
+    const hide = new THREE.MeshPhysicalMaterial({ color: '#3a3f3a', roughness: 0.35, metalness: 0.1, clearcoat: 0.8, clearcoatRoughness: 0.3 });
+    const belly = std('#6a6458', 0.6);
+    const claw = std('#c8c0a8', 0.4);
+    const body = new THREE.Group();
+    body.name = 'body';
+    body.position.y = 1;
+    const torso = new THREE.Mesh(new THREE.SphereGeometry(0.5, 18, 14), hide);
+    torso.scale.set(0.85, 0.75, 1.45);
+    torso.rotation.x = -0.35;
+    const under = new THREE.Mesh(new THREE.SphereGeometry(0.42, 14, 10), belly);
+    under.scale.set(0.8, 0.5, 1.3);
+    under.position.set(0, -0.18, 0.05);
+    body.add(torso, under);
+    // Хребет из костяных пластин.
+    for (let i = 0; i < 5; i++) {
+      const plate = new THREE.Mesh(new THREE.ConeGeometry(0.08, 0.28, 5), claw);
+      plate.position.set(0, 0.38 - i * 0.03, 0.45 - i * 0.24);
+      plate.rotation.x = -0.6;
+      body.add(plate);
+    }
+    // Голова: вытянутая, с жвалами-щупальцами.
+    const head = new THREE.Group();
+    head.name = 'head';
+    head.position.set(0, 0.35, 0.7);
+    const skull = new THREE.Mesh(new THREE.SphereGeometry(0.24, 14, 10), hide);
+    skull.scale.set(0.8, 0.7, 1.7);
+    skull.position.z = 0.22;
+    head.add(skull);
+    for (const sx of [-1, 1]) {
+      const eye = new THREE.Mesh(new THREE.SphereGeometry(0.04, 8, 6), new THREE.MeshStandardMaterial({ color: '#ff8020', emissive: '#ff5010', emissiveIntensity: 2 }));
+      eye.position.set(sx * 0.12, 0.08, 0.4);
+      head.add(eye);
+      for (const dy of [-0.06, -0.14]) {
+        const t = new THREE.Mesh(new THREE.CapsuleGeometry(0.025, 0.28, 3, 6), belly);
+        t.position.set(sx * 0.07, dy, 0.6);
+        t.rotation.x = Math.PI / 2 + 0.4;
+        t.rotation.z = sx * 0.3;
+        head.add(t);
+      }
+    }
+    body.add(head);
+    // Руки-косы.
+    for (const sx of [-1, 1]) {
+      const arm = new THREE.Group();
+      arm.name = sx < 0 ? 'armR' : 'armL';
+      arm.position.set(sx * 0.38, 0.15, 0.45);
+      const upper = new THREE.Mesh(new THREE.CapsuleGeometry(0.06, 0.55, 4, 8), hide);
+      upper.position.set(0, -0.2, 0.15);
+      upper.rotation.x = 0.9;
+      const blade = new THREE.Mesh(new THREE.ConeGeometry(0.06, 0.6, 6), claw);
+      blade.position.set(0, -0.55, 0.42);
+      blade.rotation.x = 2.2;
+      arm.add(upper, blade);
+      body.add(arm);
+    }
+    // Хвост.
+    const tail = new THREE.Mesh(new THREE.ConeGeometry(0.16, 0.9, 8), hide);
+    tail.name = 'tail';
+    tail.rotation.x = -Math.PI / 2 - 0.3;
+    tail.position.set(0, -0.05, -0.95);
+    body.add(tail);
+    this.root.add(body);
+    // Четыре лапы.
+    const legs: [string, number, number][] = [['legFL', -1, 0.35], ['legFR', 1, 0.35], ['legBL', -1, -0.4], ['legBR', 1, -0.4]];
+    for (const [name, sx, z] of legs) {
+      const leg = new THREE.Group();
+      leg.name = name;
+      leg.position.set(sx * 0.32, 0.95, z);
+      const thigh = new THREE.Mesh(new THREE.CapsuleGeometry(0.07, 0.45, 4, 8), hide);
+      thigh.position.set(sx * 0.12, -0.25, 0);
+      thigh.rotation.z = sx * 0.5;
+      const shin = new THREE.Mesh(new THREE.CapsuleGeometry(0.05, 0.5, 4, 8), hide);
+      shin.position.set(sx * 0.22, -0.68, 0);
+      shin.rotation.z = -sx * 0.15;
+      leg.add(thigh, shin);
+      this.root.add(leg);
+    }
+    this.root.scale.setScalar(scale);
+    this.root.traverse((o) => ((o as THREE.Mesh).isMesh ? (o.castShadow = true) : null));
+    const swing = (a: number) => [[0, a, 0, 0], [0.3, -a, 0, 0], [0.6, a, 0, 0]] as [number, number, number, number][];
+    WANAMINGO_CLIPS ??= [
+      makeClip('idle', 2.4, {
+        head: [[0, 0, 0, 0], [0.8, 0.1, 0.3, 0], [1.6, -0.05, -0.3, 0], [2.4, 0, 0, 0]],
+        tail: [[0, -Math.PI / 2 - 0.3, 0, 0], [1.2, -Math.PI / 2 - 0.3, 0.4, 0], [2.4, -Math.PI / 2 - 0.3, 0, 0]],
+      }, { body: [[0, 0, 1, 0], [1.2, 0, 1.04, 0], [2.4, 0, 1, 0]] }),
+      makeClip('walk', 0.6, {
+        legFL: swing(0.5), legBR: swing(0.5), legFR: swing(-0.5), legBL: swing(-0.5),
+        armL: [[0, 0.2, 0, 0], [0.3, -0.2, 0, 0], [0.6, 0.2, 0, 0]],
+        armR: [[0, -0.2, 0, 0], [0.3, 0.2, 0, 0], [0.6, -0.2, 0, 0]],
+      }, { body: [[0, 0, 1, 0], [0.15, 0, 1.05, 0], [0.3, 0, 1, 0], [0.45, 0, 1.05, 0], [0.6, 0, 1, 0]] }),
+      makeClip('attack', 0.5, {
+        body: [[0, 0, 0, 0], [0.15, 0.25, 0, 0], [0.5, 0, 0, 0]],
+        armL: [[0, 0, 0, 0], [0.12, -1.2, 0, 0], [0.25, 0.6, 0, 0], [0.5, 0, 0, 0]],
+        armR: [[0, 0, 0, 0], [0.15, -1.2, 0, 0], [0.3, 0.6, 0, 0], [0.5, 0, 0, 0]],
+      }),
+      makeClip('hit', 0.3, { body: [[0, 0, 0, 0], [0.1, -0.3, 0.2, 0], [0.3, 0, 0, 0]] }),
+      makeClip('death', 1, {
+        body: [[0, 0, 0, 0], [0.5, 0.2, 0, 0.6], [1, 0.1, 0, 1.4]],
+        legFL: [[0, 0, 0, 0], [1, 0.9, 0, 0.5]], legFR: [[0, 0, 0, 0], [1, 0.7, 0, -0.4]],
+        armL: [[0, 0, 0, 0], [1, -0.8, 0, 0.4]],
+      }, { body: [[0, 0, 1, 0], [1, 0.2, 0.4, 0]] }),
+    ];
+    this.setupAnimations(this.root, WANAMINGO_CLIPS);
+  }
+}

@@ -11,6 +11,8 @@ import { NEW_RENO } from './newreno';
 import { BROKEN_HILLS } from './brokenhills';
 import { SIERRA } from './sierra';
 import { MODOC } from './modoc';
+import { REDDING } from './redding';
+import { KOKOWEEF } from './kokoweef';
 import type { LocationDef } from './types';
 
 export const LOCATIONS: Record<string, LocationDef> = {
@@ -27,6 +29,8 @@ export const LOCATIONS: Record<string, LocationDef> = {
   brokenhills: BROKEN_HILLS,
   sierra: SIERRA,
   modoc: MODOC,
+  redding: REDDING,
+  kokoweef: KOKOWEEF,
 };
 
 /** Положение городов на карте мира (условные единицы 0..100). */
@@ -42,6 +46,7 @@ export const WORLD_MAP: Record<string, { x: number; y: number; label: string; de
   newreno: { x: 57, y: 37, label: 'Нью-Рино', desc: 'Город неона, казино и гангстерских семей.' },
   brokenhills: { x: 73, y: 46, label: 'Брокен-Хиллз', desc: 'Урановый рудник, где люди, гули и мутанты живут вместе.' },
   sierra: { x: 52, y: 18, label: 'Склад Сьерра', desc: 'Довоенный армейский склад в горах. Охраняется роботами.' },
+  redding: { x: 27, y: 37, label: 'Реддинг', desc: 'Шахтёрский город, живущий золотом.' },
   modoc: { x: 47, y: 29, label: 'Модок', desc: 'Фермерский городок: брамины, кожи и ферма с призраками.' },
 };
 

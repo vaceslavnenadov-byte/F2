@@ -229,6 +229,123 @@ export const CH5_DIALOGUES: Record<string, DialogueDef> = {
     },
   },
 
+  // ─── Реддинг ──────────────────────────────────────────────────────────────
+  dutton: {
+    start: (g) => {
+      const q = g.quests.wanamingo;
+      if (!q) return 'hello';
+      if (q.state === 'rewarded') return 'after';
+      return q.progress >= 1 ? 'report' : 'waiting';
+    },
+    nodes: {
+      hello: {
+        text: 'Даттон, мэр Реддинга. Город живёт золотом, а золото — в шахте Кокавиф. Месяц назад шахтёры пробили стену в старую пещеру, и оттуда полезли ванаминго. ' +
+          'Твари с косами вместо рук, шкура как у слизня. Семеро погибли. Шахту заколотили, а без неё Реддинг сдохнет к зиме. Убей их королеву — и тысяча крышек твоя.',
+        options: [
+          { text: 'Я спущусь в шахту.', action: (g) => g.startQuest('wanamingo'), next: 'go' },
+          { text: 'Тысяча крышек за смерть? Подумаю.', next: null },
+        ],
+      },
+      go: {
+        text: 'Вход под копром на севере. Гнездо где-то в дальней пещере, на востоке. Если увидишь кладку — сожги, приплачу ещё двести.',
+        options: [{ text: 'Понял.', next: null }],
+      },
+      waiting: {
+        text: 'Королева ещё жива? Шахтёры сидят без работы, а в «Маламуте» уже пьют в долг.',
+        options: [{ text: 'Работаю над этим.', next: null }],
+      },
+      report: {
+        text: (g) => 'Королева мертва? Ты спустился туда и вернулся? Реддинг у тебя в долгу. ' + (g.flags.has('eggsDestroyed') ? 'И кладку уничтожил — значит, они не вернутся. Держи всё, что обещал.' : 'Жаль, кладка осталась… но и так — огромное дело.'),
+        options: [
+          {
+            text: 'Забираю награду.',
+            action: (g) => {
+              g.giveItem('caps', g.flags.has('eggsDestroyed') ? 1200 : 1000);
+              g.addXp(1500);
+              g.addKarma(15);
+              g.quests.wanamingo.state = 'rewarded';
+            },
+            next: null,
+          },
+        ],
+      },
+      after: {
+        text: 'Шахта снова работает. Если надумаешь осесть — для героя Реддинга всегда найдётся дом.',
+        options: [{ text: 'Пока.', next: null }],
+      },
+    },
+  },
+
+  marge: {
+    start: () => 'hello',
+    nodes: {
+      hello: {
+        text: 'Марж Лабарж, хозяйка «Маламута». Виски, пиво, патроны — и никаких драк в зале. Ну, почти никаких.',
+        options: [
+          { text: 'Покажи товар.', action: (g) => g.openTrade('marge'), next: null },
+          { text: 'Что слышно?', next: 'rumors' },
+          { text: 'Пока.', next: null },
+        ],
+      },
+      rumors: {
+        text: 'Шахтёры только и говорят, что о тварях в Кокавифе. Даттон обещает тысячу за королеву — и никто не идёт. А доктор Джонсон всё ищет кусок ванаминго для опытов. Чокнутый.',
+        options: [{ text: 'Интересно.', next: 'hello' }],
+      },
+    },
+  },
+
+  docJohnson: {
+    start: (g) => {
+      const q = g.quests.sample;
+      if (q && q.state !== 'rewarded' && g.inv.count('wanaSample')) return 'sample';
+      return 'hello';
+    },
+    nodes: {
+      hello: {
+        text: (g) => 'Доктор Джонсон. Лечу шахтёров от того, от чего их можно вылечить. ' + (g.quests.sample?.state === 'rewarded' ? 'Сыворотка из твоего образца уже спасла двоих.' : 'Слизь ванаминго разъедает раны — мне нужен образец ткани, чтобы сделать сыворотку. Принесёшь — заплачу.'),
+        options: [
+          { text: 'Я достану образец.', cond: (g) => !g.quests.sample, action: (g) => g.startQuest('sample'), next: null },
+          {
+            text: 'Подлечите меня (50 крышек).',
+            cond: (g) => g.inv.count('caps') >= 50 && (g.char.hp < g.char.maxHp || g.char.rads > 0),
+            action: (g) => g.doctorHeal(50),
+            next: null,
+          },
+          { text: 'Пока.', next: null },
+        ],
+      },
+      sample: {
+        text: 'Это он! Ткань ещё живая… Отлично. Держи крышки и стимуляторы — первые порции сыворотки пойдут шахтёрам.',
+        options: [
+          {
+            text: 'Рад помочь.',
+            action: (g) => {
+              g.takeItem('wanaSample');
+              g.giveItem('caps', 200);
+              g.giveItem('stimpak', 3);
+              g.addXp(400);
+              g.addKarma(5);
+              g.quests.sample.state = 'rewarded';
+            },
+            next: null,
+          },
+        ],
+      },
+    },
+  },
+
+  reddingFolk: {
+    start: () => 'talk',
+    nodes: {
+      talk: {
+        text: (g) => (g.quests.wanamingo?.state === 'rewarded'
+          ? pick(['Снова в забое! Спасибо тебе, приятель.', 'Говорят, это ты прикончил королеву. Выпивка в «Маламуте» за мой счёт.', 'Золото пошло. Реддинг будет жить.'])
+          : pick(['Я слышал, как они скребутся за досками. Каждую ночь.', 'Без шахты нам конец. Кто-то должен туда спуститься.', 'Видел ванаминго? Нет? Твоё счастье.', 'Марж наливает в долг — пока.'])),
+        options: [{ text: '[Уйти]', next: null }],
+      },
+    },
+  },
+
   slag: {
     start: () => 'talk',
     nodes: {
