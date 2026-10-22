@@ -3,6 +3,7 @@ import { clamp, randInt } from '../core/math';
 import { tickTimers } from '../core/clock';
 import { Renderer } from '../engine/renderer';
 import { Effects } from '../engine/effects';
+import { audio } from '../engine/audio';
 import { World, type Interactable } from '../world/world';
 import type { Cell } from '../world/nav';
 import { heightAt } from '../world/terrain';
@@ -229,10 +230,19 @@ export class Game {
     this.ui.log(`На карте отмечено: ${WORLD_MAP[id].label}.`, 'warn');
   }
 
-  dateText(days = this.days) {
-    const d = new Date(2241, 6, 25 + Math.floor(days));
-    return `${d.getDate()} ${MONTHS[d.getMonth()]} ${d.getFullYear()}`;
+  /** Игра начинается 25 июля 2241 года в 15:00; 1 секунда реального времени = 1 игровая минута. */
+  dateText(days = this.days, withTime = false) {
+    const d = new Date(Date.UTC(2241, 6, 25, 15) + days * 864e5);
+    const date = `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
+    return withTime ? `${date}, ${this.clockText(days)}` : date;
   }
+
+  clockText(days = this.days) {
+    const d = new Date(Date.UTC(2241, 6, 25, 15) + days * 864e5);
+    return `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`;
+  }
+
+  get hour() { return (((this.days * 24 + 15) % 24) + 24) % 24; }
 
   private openWorldMap() {
     this.mode = 'map';
@@ -247,7 +257,7 @@ export class Game {
       days: this.days,
       discovered: [...this.discovered],
       here,
-      dateText: (d) => this.dateText(d),
+      dateText: (d) => this.dateText(d, true),
       encounterCheck: (dist) => {
         encounterBudget += dist;
         // Примерно одна встреча на 25 единиц пути.
@@ -441,6 +451,7 @@ export class Game {
       this.player.hp = this.char.hp;
       this.player.maxHp = this.char.maxHp;
       this.ui.banner('НОВЫЙ УРОВЕНЬ!', 2.5);
+      audio.play('levelup');
       this.ui.log(`Уровень ${this.char.level}! Очки навыков: +${this.char.skillPointsPerLevel}. Распредели их в окне персонажа (C).`, 'warn');
     }
     this.ui.updateHud();
@@ -461,6 +472,7 @@ export class Game {
     if (q.progress < stage) {
       q.progress = stage;
       this.ui.log(`Задание обновлено: «${QUESTS[id].title}».`, 'warn');
+      audio.play('quest');
     }
   }
 
@@ -473,6 +485,7 @@ export class Game {
         q.state = 'done';
         this.ui.log(goal.doneText, 'warn');
         this.ui.banner('ЗАДАНИЕ ВЫПОЛНЕНО', 2);
+        audio.play('quest');
       }
     }
   }
@@ -547,6 +560,7 @@ export class Game {
     }
     this.updatePlayerWeapon();
     this.ui.log(`Сделка с торговцем ${TRADERS[id].name} заключена.`, 'good');
+    audio.play('coins');
     this.ui.updateHud();
     return true;
   }
@@ -583,6 +597,7 @@ export class Game {
     this.inv.remove(id);
     this.ui.floatText(this.player.pos.clone().setY(this.player.pos.y + 2.1), `+${healed}`, '#7dff8a');
     this.ui.log(`${def.name}: восстановлено ${healed} ОЗ.`, 'good');
+    audio.play('heal');
     this.ui.updateHud();
   }
 
@@ -650,6 +665,9 @@ export class Game {
     this.effects.hit(target, attacker.pos, isLizard ? new THREE.Color(0.25, 0.3, 0.05) : undefined);
     this.ui.floatText(target.pos.clone().setY(target.pos.y + target.rig.height + 0.3), `−${dmg}`, target === this.player ? '#ff5a4a' : target.faction === 'companion' ? '#ff9a6a' : '#ffd060');
     target.rig.playHit();
+    const beast = !(attacker.rig instanceof HumanoidRig);
+    audio.play(beast ? 'bite' : 'hit', target.pos);
+    if (target === this.player) audio.play('hurt');
     if (target.hp <= 0) this.kill(target);
     this.ui.updateHud();
   }
@@ -658,6 +676,7 @@ export class Game {
     target.dead = true;
     target.stop();
     target.rig.playDeath();
+    audio.play('death', target.pos, 0.8);
     if (target === this.player) {
       this.gameOver();
       return;
@@ -825,6 +844,13 @@ export class Game {
 
   private bindInput() {
     const canvas = this.r.renderer.domElement;
+    // Звук запускается по первому действию пользователя.
+    const unlock = () => audio.init();
+    window.addEventListener('pointerdown', unlock);
+    window.addEventListener('keydown', unlock);
+    document.addEventListener('click', (e) => {
+      if ((e.target as HTMLElement).closest('button, .opt, .item, .tag')) audio.play('click');
+    });
     canvas.addEventListener('contextmenu', (e) => e.preventDefault());
     canvas.addEventListener('pointerdown', (e) => {
       if (e.button === 2) this.rotating = true;
@@ -874,6 +900,7 @@ export class Game {
         this.helpHidden = !this.helpHidden;
         this.ui.showHud(this.mode !== 'dead');
         break;
+      case 'KeyM': this.ui.log(audio.toggleMute() ? 'Звук выключен.' : 'Звук включён.'); break;
       case 'F5': e.preventDefault(); this.save(); break;
       case 'F9': e.preventDefault(); this.requestLoad(); break;
     }
@@ -1108,6 +1135,30 @@ export class Game {
     cam.lookAt(this.camTarget);
   }
 
+  private steps = new WeakMap<Actor, { x: number; z: number; acc: number }>();
+
+  /** Шаги: звук через каждые полшага пройденного пути. */
+  private footsteps() {
+    for (const a of this.actors) {
+      if (a.dead) continue;
+      let st = this.steps.get(a);
+      if (!st) {
+        st = { x: a.pos.x, z: a.pos.z, acc: 0 };
+        this.steps.set(a, st);
+      }
+      const d = Math.hypot(a.pos.x - st.x, a.pos.z - st.z);
+      st.x = a.pos.x;
+      st.z = a.pos.z;
+      if (d > 2) continue;
+      st.acc += d;
+      const stride = Math.max(0.35, a.rig.height * 0.45);
+      if (st.acc > stride) {
+        st.acc = 0;
+        audio.play('step', a.pos, a === this.player ? 0.6 : a.rig.height > 1.2 ? 0.35 : 0.18);
+      }
+    }
+  }
+
   private frame() {
     const now = performance.now();
     const dt = Math.min(0.05, (now - this.lastTime) / 1000);
@@ -1115,7 +1166,9 @@ export class Game {
     if (this.mode !== 'map') {
       this.time += dt;
       tickTimers(dt);
+      if (this.mode !== 'menu') this.days += dt / 1440;
     }
+    this.r.setTime(this.hour);
 
     if (this.mode === 'explore') {
       this.wasdMove(dt);
@@ -1136,6 +1189,11 @@ export class Game {
       if (this.moveMarkerT > 0.6) this.moveMarker.visible = false;
     }
 
+    this.footsteps();
+    audio.listener.x = this.camTarget.x;
+    audio.listener.z = this.camTarget.z;
+    audio.updateAmbience(this.r.night, this.world.nearestFlame(this.camTarget), this.time);
+    audio.setMusic(this.mode === 'combat' ? 'combat' : this.mode === 'dead' ? 'off' : 'explore');
     this.world.update(dt, this.time, this.camTarget);
     this.effects.update(dt);
     this.ui.update(dt, this.r.camera);

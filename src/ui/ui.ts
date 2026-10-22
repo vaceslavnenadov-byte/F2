@@ -79,6 +79,7 @@ export class UI {
     const playerTurn = inCombat && g.isPlayerTurn;
     ($('btn-end') as HTMLButtonElement).disabled = !playerTurn;
     ($('btn-combat') as HTMLButtonElement).disabled = inCombat;
+    $('clock').textContent = g.clockText();
     const ti = $('turn-indicator');
     ti.className = inCombat ? (playerTurn ? 'player' : 'enemy') : '';
     ti.textContent = playerTurn ? 'ВАШ ХОД' : 'ХОД ПРОТИВНИКА';
@@ -376,7 +377,7 @@ export class UI {
       <div class="panel-cols">
         <div class="box crt"><h3>Задания</h3>${quests}</div>
         <div class="box crt"><h3>Статус</h3>
-          <div class="row"><span>Дата</span><span class="v">${g.dateText()}</span></div>
+          <div class="row"><span>Дата</span><span class="v">${g.dateText(g.days, true)}</span></div>
           <div class="row"><span>Местность</span><span class="v">${esc(g.location.name)}</span></div>
           <div class="row"><span>Координаты</span><span class="v">${g.player.pos.x.toFixed(0)}, ${g.player.pos.z.toFixed(0)}</span></div>
           <div class="row"><span>Убито врагов</span><span class="v">${g.kills}</span></div>

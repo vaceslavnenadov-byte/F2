@@ -9,7 +9,7 @@ import { ParticleSystem } from './particles';
 
 /** Цветокоррекция «выжженной пустоши»: тёплый сдвиг, лёгкая десатурация, виньетка, плёночное зерно. */
 const GradeShader = {
-  uniforms: { tDiffuse: { value: null }, uTime: { value: 0 }, uDanger: { value: 0 } },
+  uniforms: { tDiffuse: { value: null }, uTime: { value: 0 }, uDanger: { value: 0 }, uNight: { value: 0 } },
   vertexShader: /* glsl */ `
     varying vec2 vUv;
     void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }
@@ -18,12 +18,13 @@ const GradeShader = {
     uniform sampler2D tDiffuse;
     uniform float uTime;
     uniform float uDanger;
+    uniform float uNight;
     varying vec2 vUv;
     void main() {
       vec4 c = texture2D(tDiffuse, vUv);
-      c.rgb *= vec3(1.06, 1.0, 0.9);
+      c.rgb *= mix(vec3(1.06, 1.0, 0.9), vec3(0.85, 0.95, 1.2), uNight);
       float l = dot(c.rgb, vec3(0.299, 0.587, 0.114));
-      c.rgb = mix(vec3(l), c.rgb, 0.88);
+      c.rgb = mix(vec3(l), c.rgb, mix(0.88, 0.7, uNight));
       vec2 d = vUv - 0.5;
       float v = smoothstep(0.85, 0.3, length(d * vec2(1.1, 1.0)));
       c.rgb *= mix(0.45, 1.0, v);
@@ -45,6 +46,13 @@ export class Renderer {
   private composer: EffectComposer;
   private grade: ShaderPass;
   private bloom: UnrealBloomPass;
+  private sky: Sky;
+  private hemi: THREE.HemisphereLight;
+  private stars: THREE.Points;
+  /** Направление на светило, отбрасывающее тени (солнце днём, луна ночью). */
+  private lightDir = new THREE.Vector3();
+  /** 0 — день, 1 — глубокая ночь. */
+  night = 0;
 
   constructor(container: HTMLElement) {
     this.renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
@@ -61,6 +69,7 @@ export class Renderer {
 
     // Небо с атмосферным рассеянием, закатное солнце.
     const sky = new Sky();
+    this.sky = sky;
     sky.scale.setScalar(5000);
     const u = sky.material.uniforms;
     u.turbidity.value = 9;
@@ -101,7 +110,23 @@ export class Renderer {
     this.sun.shadow.bias = -0.0004;
     this.sun.shadow.normalBias = 0.04;
     this.scene.add(this.sun, this.sun.target);
-    this.scene.add(new THREE.HemisphereLight(0xb9cde8, 0x7a5a40, 0.9));
+    this.hemi = new THREE.HemisphereLight(0xb9cde8, 0x7a5a40, 0.9);
+    this.scene.add(this.hemi);
+
+    // Звёзды: точки на большой сфере, видны только ночью.
+    const starPos: number[] = [];
+    for (let i = 0; i < 1800; i++) {
+      const v = new THREE.Vector3().randomDirection();
+      if (v.y < 0.02) v.y = Math.abs(v.y) + 0.02;
+      v.normalize().multiplyScalar(3000);
+      starPos.push(v.x, v.y, v.z);
+    }
+    const starGeo = new THREE.BufferGeometry();
+    starGeo.setAttribute('position', new THREE.Float32BufferAttribute(starPos, 3));
+    this.stars = new THREE.Points(starGeo, new THREE.PointsMaterial({ color: 0xdfe8ff, size: 1.6, sizeAttenuation: false, transparent: true, opacity: 0, fog: false, depthWrite: false }));
+    this.stars.frustumCulled = false;
+    this.scene.add(this.stars);
+    this.lightDir.copy(this.sunDir);
 
     const rt = new THREE.WebGLRenderTarget(window.innerWidth, window.innerHeight, {
       type: THREE.HalfFloatType,
@@ -122,7 +147,44 @@ export class Renderer {
   /** Тень следует за точкой интереса (игроком), чтобы карта теней оставалась чёткой. */
   followShadow(target: THREE.Vector3) {
     this.sun.target.position.copy(target);
-    this.sun.position.copy(target).addScaledVector(this.sunDir, 90);
+    this.sun.position.copy(target).addScaledVector(this.lightDir, 90);
+    this.stars.position.copy(this.camera.position);
+  }
+
+  /** Время суток в часах (0..24): положение солнца, цвет света, туман, звёзды. */
+  setTime(hour: number) {
+    const t = (hour - 5) / 15;
+    const elev = Math.sin(t * Math.PI) * 62;
+    const az = THREE.MathUtils.degToRad(110 + 180 * t);
+    this.sunDir.setFromSphericalCoords(1, THREE.MathUtils.degToRad(90 - elev), az);
+    this.sky.material.uniforms.sunPosition.value.copy(this.sunDir);
+    const day = THREE.MathUtils.smoothstep(elev, -6, 10);
+    const warm = 1 - THREE.MathUtils.smoothstep(elev, 4, 30);
+    this.night = 1 - day;
+
+    if (elev > -2) {
+      // Днём тени от солнца, на закате свет тёплый и длинные тени.
+      this.lightDir.copy(this.sunDir);
+      if (this.lightDir.y < 0.08) this.lightDir.y = 0.08;
+      this.lightDir.normalize();
+      this.sun.color.set(0xfff0dc).lerp(new THREE.Color(0xff8a48), warm);
+      this.sun.intensity = 3.1 * THREE.MathUtils.smoothstep(elev, -2, 8);
+    } else {
+      // Ночью тот же источник играет роль луны.
+      this.lightDir.set(-this.sunDir.x, Math.max(0.5, -this.sunDir.y), -this.sunDir.z).normalize();
+      this.sun.color.set(0x8aa4ff);
+      this.sun.intensity = 0.8 * THREE.MathUtils.smoothstep(-elev, 2, 12);
+    }
+    this.hemi.intensity = 0.3 + 0.6 * day;
+    this.hemi.color.set(0x34446e).lerp(new THREE.Color(0xb9cde8), day);
+    this.hemi.groundColor.set(0x1a1820).lerp(new THREE.Color(0x7a5a40), day);
+    this.scene.environmentIntensity = 0.03 + 0.32 * day;
+    const fog = this.scene.fog as THREE.FogExp2;
+    fog.color.set(0x121828).lerp(new THREE.Color(0xc9a27e), day).lerp(new THREE.Color(0xc4704e), warm * day * 0.6);
+    fog.density = 0.0065 + 0.004 * this.night;
+    (this.stars.material as THREE.PointsMaterial).opacity = THREE.MathUtils.smoothstep(this.night, 0.5, 1);
+    this.renderer.toneMappingExposure = 0.85 + 0.55 * this.night;
+    this.grade.uniforms.uNight.value = this.night;
   }
 
   set danger(v: number) { this.grade.uniforms.uDanger.value = v; }

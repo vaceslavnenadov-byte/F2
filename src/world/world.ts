@@ -478,6 +478,12 @@ export class World {
     this.group.add(g);
   }
 
+  nearestFlame(p: THREE.Vector3): number {
+    let d = Infinity;
+    for (const f of this.flames) d = Math.min(d, Math.hypot(f.pos.x - p.x, f.pos.z - p.z));
+    return d;
+  }
+
   interactable(it: Interactable) { this.interactables.push(it); }
 
   // ─── Выходы на карту мира ─────────────────────────────────────────────────

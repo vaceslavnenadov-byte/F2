@@ -1,5 +1,6 @@
 import { clamp, randInt } from '../core/math';
 import { wait } from '../core/clock';
+import { audio } from '../engine/audio';
 import type { Actor } from '../entities/actor';
 import type { Cell } from '../world/nav';
 import type { Game } from './game';
@@ -234,6 +235,7 @@ export class Combat {
     await wait(0.15);
     attacker.rig.playAttack();
     if (!w.melee) g.effects.muzzle(attacker, target);
+    audio.play(w.melee ? 'swing' : 'shot', attacker.pos);
     await wait(w.melee ? 0.2 : 0.08);
     const chance = this.hitChance(attacker, target, w);
     const roll = randInt(1, 100);
@@ -241,6 +243,7 @@ export class Combat {
     const tName = target === g.player ? 'вас' : target.name.toLowerCase();
     const ally = attacker === g.player || attacker.faction === 'companion';
     if (roll > chance) {
+      audio.play('miss', target.pos, 0.6);
       g.ui.floatText(target.pos.clone().setY(target.pos.y + target.rig.height + 0.3), 'Промах', '#e8dcc0');
       g.ui.log(isPlayer ? `Вы промахнулись по цели: ${tName}.` : `${attacker.name} промахивается.`);
       await wait(0.45);
