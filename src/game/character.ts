@@ -21,6 +21,8 @@ export const SKILLS = [
   { id: 'firstAid', name: 'Первая помощь', base: (s: Special) => 2 * (s.pe + s.in) },
   { id: 'speech', name: 'Красноречие', base: (s: Special) => 5 * s.ch },
   { id: 'barter', name: 'Бартер', base: (s: Special) => 4 * s.ch },
+  { id: 'science', name: 'Наука', base: (s: Special) => 4 * s.in },
+  { id: 'repair', name: 'Ремонт', base: (s: Special) => 3 * s.in },
   { id: 'outdoorsman', name: 'Натуралист', base: (s: Special) => 2 * (s.en + s.in) },
 ] as const;
 export type SkillId = (typeof SKILLS)[number]['id'];
@@ -31,11 +33,13 @@ export class Character {
   name = 'Избранный';
   special: Special = { st: 5, pe: 5, en: 5, ch: 5, in: 5, ag: 5, lk: 5 };
   tags = new Set<SkillId>();
-  spent: Record<SkillId, number> = { smallGuns: 0, melee: 0, unarmed: 0, firstAid: 0, speech: 0, barter: 0, outdoorsman: 0 };
+  spent: Record<SkillId, number> = { smallGuns: 0, melee: 0, unarmed: 0, firstAid: 0, speech: 0, barter: 0, science: 0, repair: 0, outdoorsman: 0 };
   level = 1;
   xp = 0;
   skillPoints = 0;
   hp = 0;
+  /** Накопленная доза радиации. */
+  rads = 0;
 
   skill(id: SkillId): number {
     const def = SKILLS.find((s) => s.id === id)!;
@@ -45,7 +49,9 @@ export class Character {
   }
 
   get maxHp() { return 15 + this.special.st + 2 * this.special.en + (this.level - 1) * (2 + Math.floor(this.special.en / 2)); }
-  get maxAp() { return 5 + Math.floor(this.special.ag / 2); }
+  /** Лучевая болезнь: каждые 200 рад отнимают 1 ОД (максимум 3). */
+  get radPenalty() { return Math.min(3, Math.floor(this.rads / 200)); }
+  get maxAp() { return 5 + Math.floor(this.special.ag / 2) - this.radPenalty; }
   get ac() { return this.special.ag; }
   get meleeBonus() { return Math.max(1, this.special.st - 5); }
   get sequence() { return 2 * this.special.pe; }
@@ -68,7 +74,7 @@ export class Character {
   }
 
   toJSON() {
-    return { name: this.name, special: this.special, tags: [...this.tags], spent: this.spent, level: this.level, xp: this.xp, skillPoints: this.skillPoints, hp: this.hp };
+    return { name: this.name, special: this.special, tags: [...this.tags], spent: this.spent, level: this.level, xp: this.xp, skillPoints: this.skillPoints, hp: this.hp, rads: this.rads };
   }
 
   static fromJSON(d: ReturnType<Character['toJSON']>): Character {
@@ -81,6 +87,7 @@ export class Character {
     c.xp = d.xp;
     c.skillPoints = d.skillPoints;
     c.hp = d.hp;
+    c.rads = d.rads ?? 0;
     return c;
   }
 }

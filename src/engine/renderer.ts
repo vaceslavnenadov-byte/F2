@@ -151,12 +151,32 @@ export class Renderer {
     this.stars.position.copy(this.camera.position);
   }
 
+  /** Освещение помещения: без неба, холодный рассеянный свет сверху, тёмный туман. */
+  setIndoor() {
+    this.night = 0.6;
+    this.sky.visible = false;
+    this.lightDir.set(0.15, 1, 0.25).normalize();
+    this.sun.color.set(0xc8d8ff);
+    this.sun.intensity = 0.9;
+    this.hemi.intensity = 0.55;
+    this.hemi.color.set(0x8090b0);
+    this.hemi.groundColor.set(0x202228);
+    this.scene.environmentIntensity = 0.12;
+    const fog = this.scene.fog as THREE.FogExp2;
+    fog.color.set(0x07080a);
+    fog.density = 0.02;
+    (this.stars.material as THREE.PointsMaterial).opacity = 0;
+    this.renderer.toneMappingExposure = 1.05;
+    this.grade.uniforms.uNight.value = 0.35;
+  }
+
   /** Время суток в часах (0..24): положение солнца, цвет света, туман, звёзды. */
   setTime(hour: number) {
     const t = (hour - 5) / 15;
     const elev = Math.sin(t * Math.PI) * 62;
     const az = THREE.MathUtils.degToRad(110 + 180 * t);
     this.sunDir.setFromSphericalCoords(1, THREE.MathUtils.degToRad(90 - elev), az);
+    this.sky.visible = true;
     this.sky.material.uniforms.sunPosition.value.copy(this.sunDir);
     const day = THREE.MathUtils.smoothstep(elev, -6, 10);
     const warm = 1 - THREE.MathUtils.smoothstep(elev, 4, 30);

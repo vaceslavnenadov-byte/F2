@@ -14,7 +14,7 @@ const PEN = { x: -25, z: -4 };
 export const NAGOR_HOME = { x: -12.5, z: 9.5 };
 const EXIT = { x: 0, z: 55, r: 4 };
 
-function buildVillage(w: World) {
+function buildVillage(w: World, raided: boolean) {
   const { x: vx, z: vz } = VILLAGE;
   const huts = [
     { x: 0, z: -17, r: 4.2, h: 3.0 },
@@ -28,7 +28,20 @@ function buildVillage(w: World) {
   huts.forEach((hd, i) => {
     const x = vx + hd.x;
     const z = vz + hd.z;
-    w.place(w.hut(hd.r, hd.h, i * 13 + 3), x, z, Math.atan2(vx - x, vz - z), 0.15);
+    const hut = w.hut(hd.r, hd.h, i * 13 + 3);
+    if (raided) {
+      // Обугленные крыши и пожар после налёта.
+      const charred = new THREE.MeshStandardMaterial({ color: '#2a1e16', roughness: 1 });
+      hut.traverse((o) => ((o as THREE.Mesh).isMesh && (o as THREE.Mesh).material === w.mat.thatch ? ((o as THREE.Mesh).material = charred) : null));
+      if (i % 2 === 0) {
+        // Пламя на поверхности крыши: у макушки и на скате.
+        const base = w.y(x, z);
+        w.addFlame(new THREE.Vector3(x, base + hd.h * 1.95, z), 22, 1.8);
+        w.addFlame(new THREE.Vector3(x + hd.r * 0.8, base + hd.h * 1.45, z + hd.r * 0.3), 0, 1.4, false);
+        w.addFlame(new THREE.Vector3(x - hd.r * 0.5, base + hd.h * 1.6, z - hd.r * 0.6), 0, 1.2, false);
+      }
+    }
+    w.place(hut, x, z, Math.atan2(vx - x, vz - z), 0.15);
     w.nav.blockCircle(x, z, hd.r + 0.4);
     for (let k = 0; k < 2; k++) {
       const a = Math.atan2(vx - x, vz - z) + (k ? 0.9 : -0.9);
@@ -206,6 +219,12 @@ function buildDogSpot(w: World) {
 
 function spawn(g: Game) {
   const add = g.spawn.bind(g);
+  if (g.flags.has('arroyoRaided')) {
+    // После налёта Анклава в деревне остался только раненый шаман.
+    add(human('hakunin', 'Хакунин', { skin: SKIN.b, cloth: '#3e3428', hair: '#4a4a48', top: '#2f5a6a', beard: true }, 'staff', { dialogue: 'hakuninRaid' }), 2, 4);
+    if (g.quests.dog?.state === 'rewarded' && !g.dog.dead) add(g.dog, 3.5, 5.5);
+    return;
+  }
   add(human('elder', 'Старейшина', { skin: '#b0805e', cloth: '#5a3d2a', hair: '#d8d4cc', top: '#7a2e22', beard: true, scale: 0.96 }, 'staff', { dialogue: 'elder' }), 0, -11.5);
   add(human('hakunin', 'Хакунин', { skin: SKIN.b, cloth: '#3e3428', hair: '#4a4a48', top: '#2f5a6a', beard: true }, 'staff', { dialogue: 'hakunin', wanderRadius: 2 }), 9, -4.5);
   add(human('nagor', 'Нагор', { skin: '#c08a62', cloth: '#7b5a3c', hair: '#2a1a10' }, 'none', { dialogue: 'nagor', wanderRadius: 3 }), NAGOR_HOME.x, NAGOR_HOME.z);
@@ -262,8 +281,8 @@ export const ARROYO: LocationDef = {
       { x: DOG_SPOT.x, z: DOG_SPOT.z, r: 6 },
     ],
   },
-  build(w) {
-    buildVillage(w);
+  build(w, flags) {
+    buildVillage(w, flags.has('arroyoRaided'));
     buildTemple(w);
     buildNest(w);
     buildDogSpot(w);

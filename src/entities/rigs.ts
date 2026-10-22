@@ -112,10 +112,12 @@ export interface HumanoidLook {
   beard?: boolean;
   build?: number;
   scale?: number;
-  armor?: 'jacket' | 'leather' | 'metal';
+  armor?: 'jacket' | 'leather' | 'metal' | 'power';
+  /** Особые существа на человеческом скелете. */
+  monster?: 'deathclaw';
 }
 
-const ARMOR_COLORS = { jacket: '#3e2c20', leather: '#5e3c22', metal: '#6e6c66' };
+const ARMOR_COLORS = { jacket: '#3e2c20', leather: '#5e3c22', metal: '#6e6c66', power: '#2a2c2f' };
 
 type HumanBone = 'hips' | 'spine' | 'chest' | 'neck' | 'head' | 'upperArmL' | 'upperArmR' | 'foreArmL' | 'foreArmR' | 'handL' | 'handR' | 'thighL' | 'thighR' | 'shinL' | 'shinR' | 'footL' | 'footR' | 'weaponHolder';
 
@@ -264,9 +266,11 @@ export class HumanoidRig extends Rig {
     this.height = 1.8 * scale;
     this.cycleDistance = 1.9;
 
-    const skin = new THREE.Color(look.skin);
-    const cloth = new THREE.Color(look.cloth);
-    const hair = new THREE.Color(look.hair);
+    // Силовая броня закрывает всё тело: «кожа» становится металлом.
+    const power = look.armor === 'power';
+    const skin = new THREE.Color(power ? '#33363a' : look.skin);
+    const cloth = new THREE.Color(power ? '#26282b' : look.cloth);
+    const hair = new THREE.Color(power ? '#33363a' : look.hair);
     const topColor = look.armor ? ARMOR_COLORS[look.armor] : look.top;
     const top = topColor ? new THREE.Color(topColor) : null;
     const leather = new THREE.Color('#4e3626');
@@ -370,7 +374,26 @@ export class HumanoidRig extends Rig {
     holder.add(this.inner);
     sb.attach('handR', holder, V(-0.245 * b, 0.9, 0.01));
 
-    if (look.armor) {
+    if (power) {
+      const shell = std('#2e3134', 0.35, 0.85);
+      const helmet = new THREE.Mesh(new THREE.SphereGeometry(0.16, 16, 12), shell);
+      helmet.scale.set(1, 1.05, 1.08);
+      sb.attach('head', helmet, V(0, 1.71, 0.01));
+      const visor = new THREE.Mesh(new THREE.BoxGeometry(0.17, 0.05, 0.05), new THREE.MeshStandardMaterial({ color: '#ff5030', emissive: '#ff3010', emissiveIntensity: 2.5 }));
+      sb.attach('head', visor, V(0, 1.72, 0.165));
+      const tank = new THREE.Mesh(new THREE.BoxGeometry(0.34 * b, 0.36, 0.18), shell);
+      sb.attach('chest', tank, V(0, 1.36, -0.2 * b));
+      for (const [s2, x] of [['L', 1], ['R', -1]] as const) {
+        const pad = new THREE.Mesh(new THREE.SphereGeometry(0.13 * b, 12, 8, 0, Math.PI * 2, 0, Math.PI / 2), shell);
+        pad.scale.set(1.15, 0.8, 1.1);
+        pad.rotation.z = -x * 0.35;
+        sb.attach(`upperArm${s2}`, pad, V(0.21 * x * b, 1.48, 0));
+        const knee = new THREE.Mesh(new THREE.SphereGeometry(0.075 * b, 10, 8), shell);
+        sb.attach(`shin${s2}`, knee, V(0.1 * x * b, 0.5, 0.06));
+      }
+      const plate = new THREE.Mesh(new THREE.BoxGeometry(0.4 * b, 0.34, 0.08), shell);
+      sb.attach('chest', plate, V(0, 1.36, 0.15 * b));
+    } else if (look.armor) {
       const padMat = look.armor === 'metal' ? std('#8a8a86', 0.35, 0.8) : std(look.armor === 'leather' ? '#4a2e1a' : '#33241a', 0.75);
       for (const [s2, x] of [['L', 1], ['R', -1]] as const) {
         const pad = new THREE.Mesh(new THREE.SphereGeometry(0.085 * b, 12, 8, 0, Math.PI * 2, 0, Math.PI / 2), padMat);
@@ -385,6 +408,26 @@ export class HumanoidRig extends Rig {
         belt.rotation.x = Math.PI / 2;
         belt.scale.set(1.15, 0.82, 1);
         sb.attach('hips', belt, V(0, 0.98, 0));
+      }
+    }
+
+    if (look.monster === 'deathclaw') {
+      // Коготь смерти: рога и длинные когти на руках.
+      const bone = std('#d8ccb0', 0.5);
+      for (const [s2, x] of [['L', 1], ['R', -1]] as const) {
+        const horn = new THREE.Mesh(new THREE.ConeGeometry(0.035, 0.32, 8), bone);
+        horn.rotation.set(-0.5, 0, -x * 0.5);
+        sb.attach('head', horn, V(0.07 * x, 1.83, -0.02));
+        for (let k = -1; k <= 1; k++) {
+          const claw = new THREE.Mesh(new THREE.ConeGeometry(0.018, 0.26, 6), bone);
+          claw.rotation.x = Math.PI + 0.3;
+          sb.attach(`hand${s2}`, claw, V(0.245 * x * b + k * 0.025, 0.78, 0.04));
+        }
+      }
+      const eyeMat = new THREE.MeshStandardMaterial({ color: '#ffd040', emissive: '#a06000', emissiveIntensity: 1.2 });
+      for (const x of [-1, 1]) {
+        const eye = new THREE.Mesh(new THREE.SphereGeometry(0.02, 8, 6), eyeMat);
+        sb.attach('head', eye, V(0.04 * x, 1.725, 0.1));
       }
     }
 

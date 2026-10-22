@@ -73,7 +73,7 @@ export class World {
   readonly nav: NavGrid;
   readonly terrain: THREE.Mesh;
   readonly interactables: Interactable[] = [];
-  readonly fire = new ParticleSystem(700, THREE.AdditiveBlending, -1.2, 0.6);
+  readonly fire = new ParticleSystem(2000, THREE.AdditiveBlending, -1.2, 0.6);
   readonly smoke = new ParticleSystem(400, THREE.NormalBlending, -0.15, 0.3);
   readonly dust = new ParticleSystem(400, THREE.NormalBlending, 0, 0);
   readonly tex: DetailTextures;
@@ -82,9 +82,10 @@ export class World {
   private readonly timeUniform = { value: 0 };
   private readonly flames: { pos: THREE.Vector3; light: THREE.PointLight | null; base: number; scale: number }[] = [];
   private readonly exitMats: THREE.ShaderMaterial[] = [];
+  private readonly steams: THREE.Vector3[] = [];
   private fireAcc = 0;
 
-  constructor(readonly loc: LocationDef) {
+  constructor(readonly loc: LocationDef, flags: Set<string> = new Set()) {
     setTerrain(loc.terrain);
     this.rnd = mulberry32(loc.terrain.seed * 7919 + 2241);
     this.tex = createTextures();
@@ -126,7 +127,7 @@ export class World {
       glow: new THREE.MeshStandardMaterial({ color: '#ffcf8a', emissive: '#ffa040', emissiveIntensity: 1.5 }),
     };
 
-    loc.build(this);
+    loc.build(this, flags);
     this.buildExits(loc.exits);
     const reserved = [...loc.scatter.reserved, ...loc.exits.map((e) => ({ ...e, r: e.r + 3 }))];
     this.scatterRocks(loc.scatter.rocks, reserved);
@@ -478,6 +479,9 @@ export class World {
     this.group.add(g);
   }
 
+  /** Столб пара (градирни, трубы). */
+  addSteam(pos: THREE.Vector3) { this.steams.push(pos); }
+
   nearestFlame(p: THREE.Vector3): number {
     let d = Infinity;
     for (const f of this.flames) d = Math.min(d, Math.hypot(f.pos.x - p.x, f.pos.z - p.z));
@@ -683,6 +687,20 @@ export class World {
           });
         }
         if (f.light) f.light.intensity = f.base * (0.8 + Math.random() * 0.35);
+      }
+      for (const sp of this.steams) {
+        if (Math.random() < 0.35) {
+          c.setRGB(0.9, 0.9, 0.9);
+          this.smoke.emit({
+            pos: sp.clone().add(new THREE.Vector3((Math.random() - 0.5) * 6, 0, (Math.random() - 0.5) * 6)),
+            vel: new THREE.Vector3(0.8 + Math.random() * 0.4, 1.5 + Math.random(), (Math.random() - 0.5) * 0.4),
+            life: 6,
+            size: 4,
+            grow: 3,
+            alpha: 0.3,
+            color: c,
+          });
+        }
       }
       if (Math.random() < 0.5) {
         c.setRGB(0.85, 0.7, 0.55);

@@ -19,7 +19,7 @@ export interface ArmorStats {
   dt: number;
   /** Сопротивление урону (доля 0..1). */
   dr: number;
-  look: 'jacket' | 'leather' | 'metal';
+  look: 'jacket' | 'leather' | 'metal' | 'power';
 }
 
 export interface ItemDef {
@@ -90,6 +90,28 @@ export const ITEMS: Record<string, ItemDef> = {
     id: 'stimpak', name: 'Стимулятор', kind: 'consumable', value: 75, heal: [15, 25], useAp: 2,
     desc: 'Довоенный шприц с лечебной смесью. Быстро затягивает раны.',
   },
+  radaway: {
+    id: 'radaway', name: 'Антирадин', kind: 'consumable', value: 60, useAp: 2,
+    desc: 'Капельница, выводящая радиацию из организма. Снимает 150 рад.',
+  },
+  radx: {
+    id: 'radx', name: 'Рад-Х', kind: 'consumable', value: 40, useAp: 1,
+    desc: 'Таблетки от облучения. Вдвое снижают получаемую дозу на час.',
+  },
+  combatArmor: {
+    id: 'combatArmor', name: 'Боевая броня', kind: 'armor', value: 1600,
+    desc: 'Довоенная армейская броня из композитных пластин. Гордость стражи Убежища-Сити.',
+    armor: { ac: 20, dt: 5, dr: 0.4, look: 'metal' },
+  },
+  assaultRifle: {
+    id: 'assaultRifle', name: 'Штурмовая винтовка', kind: 'weapon', value: 900,
+    desc: 'Скорострельная армейская винтовка под 5-мм патрон. Стреляет короткими очередями.',
+    weapon: { skill: 'smallGuns', dmg: [12, 26], ap: 6, range: 26, melee: false, ammo: 'ammo5', visual: 'rifle' },
+  },
+  ammo5: { id: 'ammo5', name: 'Патроны 5 мм', kind: 'ammo', value: 3, desc: 'Мелкокалиберные патроны для автоматического оружия.' },
+  regulator: { id: 'regulator', name: 'Регулятор потока', kind: 'misc', value: 0, desc: 'Тяжёлая деталь реактора, обмотанная изолентой. Нужна в Гекко.' },
+  v13coords: { id: 'v13coords', name: 'Голодиск Убежища 8', kind: 'misc', value: 0, desc: 'Голодиск с координатами довоенных убежищ, включая Убежище 13.' },
+  geck: { id: 'geck', name: 'ГЭКК', kind: 'misc', value: 0, desc: 'Генератор Эдемского Комплекса Колонизации. Чемодан, способный превратить пустошь в сад.' },
   hide: { id: 'hide', name: 'Шкура геккона', kind: 'misc', value: 15, desc: 'Прочная чешуйчатая кожа. Пригодится для обмена.' },
   goldHide: { id: 'goldHide', name: 'Шкура золотого геккона', kind: 'misc', value: 60, desc: 'Переливается на солнце. Ценный трофей.' },
   caps: { id: 'caps', name: 'Крышки', kind: 'misc', value: 1, desc: 'Бутылочные крышки — деньги пустоши.' },
@@ -100,6 +122,12 @@ export const ITEMS: Record<string, ItemDef> = {
 export const TRADERS: Record<string, { name: string; stock: [string, number][] }> = {
   hakunin: { name: 'Хакунин', stock: [['caps', 60], ['powder', 5], ['flint', 3]] },
   maida: { name: 'Мэйда Бакнер', stock: [['caps', 350], ['powder', 6], ['ammo10', 30], ['knife', 2], ['leatherJacket', 1], ['sledge', 1], ['flint', 4]] },
+  vcstore: {
+    name: 'Лавка Убежище-Сити',
+    stock: [['caps', 900], ['ammo10', 60], ['ammo223', 40], ['ammo5', 60], ['assaultRifle', 1], ['combatArmor', 1], ['leatherArmor', 1], ['stimpak', 5]],
+  },
+  vcdoctor: { name: 'Доктор Андерс', stock: [['caps', 400], ['stimpak', 8], ['radaway', 6], ['radx', 6]] },
+  gecko: { name: 'Лорин', stock: [['caps', 250], ['radaway', 4], ['radx', 5], ['ammo10', 20], ['ammo5', 20], ['powder', 2]] },
   becky: {
     name: 'Бекки',
     stock: [['caps', 600], ['ammo10', 50], ['ammo223', 30], ['pistol10', 1], ['huntingRifle', 1], ['leatherArmor', 1], ['metalArmor', 1], ['stimpak', 4], ['powder', 2], ['knife', 1]],

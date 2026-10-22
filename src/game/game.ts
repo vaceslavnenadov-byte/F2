@@ -215,9 +215,14 @@ export class Game {
     this.actors = [];
     this.hitProxies = [];
     this.location = def;
+    if (def.id === 'arroyo' && this.flags.has('hasGeck') && !this.flags.has('arroyoRaided')) {
+      this.flags.add('arroyoRaided');
+      this.ui.banner('АРРОЙО В ОГНЕ', 3);
+      this.ui.log('Деревня горит. Повсюду следы тяжёлых сапог… Найди выживших.', 'bad');
+    }
     if (def.id === 'encounter') this.locState.encounter = { dead: [] };
     this.locState[def.id] ??= { dead: [] };
-    this.world = new World(def);
+    this.world = new World(def, this.flags);
     this.r.scene.add(this.world.group);
 
     const [x, z] = at ?? def.entries[entry] ?? def.entries.default;
@@ -608,7 +613,29 @@ export class Game {
 
   useItem(id: string) {
     const def = ITEMS[id];
-    if (!def.heal || !this.inv.count(id)) return;
+    if (!this.inv.count(id)) return;
+    if (id === 'radaway' || id === 'radx') {
+      if (id === 'radaway' && this.char.rads <= 0) {
+        this.ui.log('Радиации в организме нет.');
+        return;
+      }
+      if (this.mode === 'combat' && (!this.combat || !this.combat.spendPlayerAp(def.useAp ?? 2))) {
+        this.ui.log('Сейчас нельзя: не ваш ход или мало ОД.', 'warn');
+        return;
+      }
+      this.inv.remove(id);
+      if (id === 'radaway') {
+        this.char.rads = Math.max(0, this.char.rads - 150);
+        this.ui.log(`Антирадин: доза снижена до ${Math.round(this.char.rads)} рад.`, 'good');
+      } else {
+        this.radxUntil = this.days + 1 / 24;
+        this.ui.log('Рад-Х: защита от радиации на час.', 'good');
+      }
+      audio.play('heal');
+      this.syncAp();
+      return;
+    }
+    if (!def.heal) return;
     if (this.char.hp >= this.char.maxHp) {
       this.ui.log('Вы и так здоровы.');
       return;
@@ -628,6 +655,44 @@ export class Game {
     this.ui.log(`${def.name}: восстановлено ${healed} ОЗ.`, 'good');
     audio.play('heal');
     this.ui.updateHud();
+  }
+
+  /** Лучевая болезнь меняет максимум ОД. */
+  private syncAp() {
+    this.player.maxAp = this.char.maxAp;
+    if (this.mode !== 'combat') this.player.ap = this.char.maxAp;
+    this.ui.updateHud();
+  }
+
+  private radxUntil = -1;
+  private geigerAcc = 0;
+  private radWarned = 0;
+
+  /** Радиоактивные зоны локации: доза, треск счётчика, последствия. */
+  private radiation(dt: number) {
+    const zones = this.location.radZones;
+    if (!zones || this.mode === 'menu' || this.mode === 'map' || this.mode === 'dead') return;
+    let rate = 0;
+    for (const z of zones) {
+      const d = Math.hypot(this.player.pos.x - z.x, this.player.pos.z - z.z);
+      if (d < z.r) rate += z.rate * (1 - (d / z.r) * 0.5);
+    }
+    if (rate <= 0) return;
+    if (this.days < this.radxUntil) rate *= 0.5;
+    const before = this.char.radPenalty;
+    this.char.rads += rate * dt;
+    // Счётчик Гейгера трещит тем чаще, чем выше фон.
+    this.geigerAcc += rate * dt * 3;
+    while (this.geigerAcc > Math.random()) {
+      this.geigerAcc -= 1;
+      audio.play('geiger', undefined, 0.5);
+    }
+    const level = Math.floor(this.char.rads / 100);
+    if (level > this.radWarned) {
+      this.radWarned = level;
+      this.ui.log(`Доза радиации: ${level * 100} рад.${level >= 2 ? ' Лучевая болезнь отнимает силы.' : ' Тошнит.'}`, 'bad');
+    }
+    if (this.char.radPenalty !== before) this.syncAp();
   }
 
   spendSkillPoint(id: SkillId) {
@@ -850,9 +915,112 @@ export class Game {
   }
 
   private interactObject(it: Interactable) {
-    if (it.id === 'temple') {
-      this.ui.log('Храм Испытаний. Ты уже прошёл его — каменная дверь запечатана до следующего Избранного.');
+    switch (it.id) {
+      case 'temple':
+        this.ui.log('Храм Испытаний. Ты уже прошёл его — каменная дверь запечатана до следующего Избранного.');
+        break;
+      case 'vcgate':
+        this.ui.log('Ворота заперты. Без пропуска граждане чужаков не пускают — поговори с офицером на таможне.', 'warn');
+        break;
+      case 'v8terminal':
+        if (!this.flags.has('citizenAccess')) {
+          this.ui.log('ДОСТУП ЗАПРЕЩЁН. Терминал требует допуска гражданина.', 'warn');
+        } else if (!this.flags.has('v13known')) {
+          this.flags.add('v13known');
+          this.ui.log('Архив Волт-Тек… список убежищ… УБЕЖИЩЕ 13: координаты найдены. Голодиск записан.', 'good');
+          this.giveItem('v13coords');
+          this.discover('vault13');
+          this.advanceQuest('geck', 7);
+          this.addXp(300);
+        } else this.ui.log('Терминал Убежища 8 мерцает. Координаты Убежища 13 уже у тебя.');
+        break;
+      case 'regulatorCrate':
+        if (this.flags.has('gotRegulator')) break;
+        this.flags.add('gotRegulator');
+        this.giveItem('regulator');
+        this.advanceQuest('reactor', 1);
+        this.removeInteractable(it);
+        break;
+      case 'reactorPanel':
+        if (this.flags.has('reactorFixed')) this.ui.log('Индикаторы горят зелёным. Реактор работает ровно.');
+        else if (!this.inv.count('regulator')) this.ui.log('Пульт мигает красным. Регулятор потока выгорел — нужна новая деталь.', 'warn');
+        else if (this.char.skill('repair') >= 60) {
+          this.ui.log('Вы сами меняете регулятор потока. Стрелки приборов ползут в зелёную зону. [Ремонт]', 'good');
+          this.fixReactor(true);
+        } else this.ui.log('Слишком сложно без навыка (Ремонт 60). Отдай деталь Скиту.', 'warn');
+        break;
+      case 'geckPedestal':
+        if (this.flags.has('hasGeck')) {
+          this.ui.log('Постамент пуст.');
+          break;
+        }
+        if (!this.flags.has('clawsAllow') && this.actors.some((a) => !a.dead && (a.id.startsWith('claw') || a.id === 'grah'))) {
+          this.ui.log('Когти смерти не подпустят к ГЭКК без разрешения Граха.', 'warn');
+          break;
+        }
+        this.flags.add('hasGeck');
+        this.giveItem('geck');
+        this.advanceQuest('geck', 8);
+        this.addXp(1000);
+        this.ui.banner('ГЭКК НАЙДЕН', 3);
+        this.removeInteractable(it);
+        break;
     }
+  }
+
+  private removeInteractable(it: Interactable) {
+    const i = this.world.interactables.indexOf(it);
+    if (i >= 0) this.world.interactables.splice(i, 1);
+    if (it.id === 'regulatorCrate' || it.id === 'geckPedestal') {
+      // Убираем сам предмет с постамента/ящик.
+      if (it.id === 'regulatorCrate') it.object.visible = false;
+      else it.object.children.slice(1).forEach((c) => (c.visible = false));
+    }
+  }
+
+  fixReactor(byPlayer: boolean) {
+    this.inv.remove('regulator');
+    this.flags.add('reactorFixed');
+    const q = this.quests.reactor ?? (this.quests.reactor = { state: 'active', progress: 1 });
+    q.state = 'rewarded';
+    this.addXp(byPlayer ? 600 : 350);
+    if (this.quests.geck?.progress === 4) this.advanceQuest('geck', 5);
+    this.ui.banner('УТЕЧКА ОСТАНОВЛЕНА', 2.5);
+  }
+
+  /** Полное лечение у доктора: раны и радиация. */
+  doctorHeal(cost: number) {
+    this.takeItem('caps', cost);
+    this.char.hp = this.char.maxHp;
+    this.player.hp = this.char.hp;
+    this.char.rads = 0;
+    this.radWarned = 0;
+    audio.play('heal');
+    this.syncAp();
+  }
+
+  /** Пропуск в Убежище-Сити: ворота открываются. */
+  openVaultCityGate() {
+    this.flags.add('vcPass');
+    const gate = this.world.interactables.find((i) => i.id === 'vcgate');
+    if (gate) {
+      gate.object.visible = false;
+      this.removeInteractable(gate);
+      this.nav.unblockCircle(gate.object.position.x, gate.object.position.z, 3.4);
+    }
+    this.ui.log('Ворота Убежище-Сити открыты для вас.', 'good');
+  }
+
+  /** Мирные существа становятся врагами и сразу нападают. */
+  turnHostile(ids: string[], flag?: string) {
+    if (flag) this.flags.add(flag);
+    for (const a of this.actors) {
+      if (!ids.includes(a.id) || a.dead) continue;
+      a.faction = 'hostile';
+      a.dialogue = undefined;
+      a.detectRadius = 30;
+    }
+    this.closeDialogue();
   }
 
   private findDog() {
@@ -1234,7 +1402,9 @@ export class Game {
       tickTimers(dt);
       if (this.mode !== 'menu') this.days += dt / 1440;
     }
-    this.r.setTime(this.hour);
+    if (this.location.indoor) this.r.setIndoor();
+    else this.r.setTime(this.hour);
+    this.radiation(dt);
 
     if (this.mode === 'explore') {
       this.wasdMove(dt);

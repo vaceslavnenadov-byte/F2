@@ -83,3 +83,49 @@ export function sulik(): Actor {
     dialogue: 'sulik', hp: 42, ap: 8, ac: 8, skill: 68, attack: ATTACKS.club, sequence: 8, speed: 3.6, dt: 1, dr: 0.1,
   });
 }
+
+// ─── Глава II ─────────────────────────────────────────────────────────────
+
+export const GHOUL_SKIN = ['#7d8466', '#8a8466', '#6f7a60'];
+
+/** Мирный гуль: кожа землистая, клочья волос. */
+export function ghoul(id: string, name: string, variant: number, def: Partial<ActorDef> = {}): Actor {
+  const skin = GHOUL_SKIN[variant % 3];
+  return human(id, name, { skin, cloth: '#4a4438', hair: '#5a5a48', top: variant % 2 ? '#5a5240' : undefined, build: 0.82 }, 'none', {
+    hp: 30, speed: 2.8, ...def,
+  });
+}
+
+export function feralGhoul(id: string, variant = 0): Actor {
+  return human(id, 'Дикий гуль', { skin: GHOUL_SKIN[variant % 3], cloth: '#2e2a24', hair: '#3a3a30', build: 0.8 }, 'none', {
+    faction: 'hostile', hp: 22, ap: 7, ac: 6, skill: 52, attack: ATTACKS.knife, xp: 90, sequence: 7, speed: 3.6,
+    tag: 'ferals', wanderRadius: 3, detectRadius: 9, dr: 0.1, loot: [['caps', 0, 10], ['radaway', 0, 1]],
+  });
+}
+
+export const DEATHCLAW_SWIPE: WeaponStats = { skill: 'unarmed', dmg: [8, 18], ap: 4, range: 1.8, melee: true, visual: 'none' };
+
+/** Коготь смерти: огромный рогатый ящер на двух ногах. Разумен — умеет говорить. */
+export function deathclaw(id: string, name: string, def: Partial<ActorDef> = {}): Actor {
+  return human(id, name, { skin: '#4e3e2c', cloth: '#4e3e2c', hair: '#4e3e2c', build: 1.55, scale: 1.3, monster: 'deathclaw' }, 'none', {
+    hp: 80, ap: 9, ac: 18, skill: 75, attack: DEATHCLAW_SWIPE, xp: 500, sequence: 10, speed: 4.2,
+    dt: 4, dr: 0.3, detectRadius: 0, ...def,
+  });
+}
+
+export function enclaveSoldier(id: string): Actor {
+  return human(id, 'Солдат Анклава', { skin: '#33363a', cloth: '#26282b', hair: '#33363a', build: 1.25, scale: 1.08, armor: 'power' }, 'rifle', {
+    hp: 120, ap: 9, ac: 30, skill: 90, attack: ATTACKS.pistol, dt: 8, dr: 0.5, speed: 3,
+  });
+}
+
+export function vaultCitizen(id: string, name: string, variant: number, def: Partial<ActorDef> = {}): Actor {
+  const skins = [SKIN.pale, SKIN.a, SKIN.b];
+  return human(id, name, { skin: skins[variant % 3], cloth: '#2c4a7a', hair: ['#3a2516', '#c8a060', '#1a1210'][variant % 3], top: '#2f5590', build: 0.92 }, 'none', def);
+}
+
+export function vcGuard(id: string): Actor {
+  return human(id, 'Охранник', { skin: SKIN.pale, cloth: '#3a3c40', hair: '#2a1a10', build: 1.1, armor: 'metal' }, 'rifle', {
+    hp: 70, ap: 8, ac: 25, skill: 80, attack: ATTACKS.pistol, dt: 5, dr: 0.4,
+  });
+}

@@ -11,6 +11,10 @@ export interface LocationDef {
   /** Зоны выхода на карту мира. */
   exits: Circle[];
   scatter: { rocks: number; trees: number; grass: number; reserved: Circle[] };
-  build(w: World): void;
+  /** Помещение: свой свет без неба и смены дня. */
+  indoor?: boolean;
+  /** Радиоактивные зоны: доза в рад/с внутри круга. */
+  radZones?: (Circle & { rate: number })[];
+  build(w: World, flags: Set<string>): void;
   spawn(g: Game): void;
 }

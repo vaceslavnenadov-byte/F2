@@ -1,5 +1,6 @@
 import type { Game } from './game';
 import { CAGE } from '../world/locations/den';
+import { CH2_DIALOGUES } from './dialogues_ch2';
 
 type Text = string | ((g: Game) => string);
 
@@ -151,7 +152,9 @@ export const DIALOGUES: Record<string, DialogueDef> = {
         text: (g) =>
           g.quests.geck.progress === 0
             ? 'Спроси о Вике в Кламате. Там всегда кто-то торгует, кто-то пьёт — кто-нибудь да знает.'
-            : 'Дэн — дурное место, дитя. Держи копьё наготове и не верь тамошним людям.',
+            : g.quests.geck.progress < 3
+              ? 'Дэн — дурное место, дитя. Держи копьё наготове и не верь тамошним людям.'
+              : 'Ты ушёл дальше, чем любой из нас. Слушай своё сердце — и не трать время. Засуха не ждёт.',
         options: [{ text: 'Спасибо.', next: null }],
       },
     },
@@ -476,9 +479,8 @@ export const DIALOGUES: Record<string, DialogueDef> = {
             action: (g) => {
               g.flags.add('vicTalked');
               g.advanceQuest('geck', 3);
-              g.quests.geck.state = 'rewarded';
+              g.discover('vaultcity');
               g.addXp(500);
-              g.ui.banner('ПРОДОЛЖЕНИЕ СЛЕДУЕТ…', 3.5);
             },
             next: null,
           },
@@ -524,6 +526,8 @@ export const DIALOGUES: Record<string, DialogueDef> = {
       },
     },
   },
+
+  ...CH2_DIALOGUES,
 
   villager: {
     start: () => 'talk',

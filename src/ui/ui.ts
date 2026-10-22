@@ -13,6 +13,9 @@ function esc(s: string) {
 const LOCATION_NOTES: Record<string, string> = {
   arroyo: 'Храм Испытаний — к северу. Гнездо гекконов — к востоку. Нагор живёт у западной хижины. Южная тропа ведёт к выходу в пустошь.',
   klamath: 'Салун Мэйды — на северной стороне улицы. Склад — на западной окраине, загон Торра — на востоке. Выход — по дороге на восток.',
+  vaultcity: 'Таможня — у ворот снаружи. Совет — в центре города, Убежище 8 — у северной стены. Доктор — на западе, лавка — на востоке.',
+  gecko: 'Станция — к востоку. Пульт реактора — у входа. Двор с отходами за станцией радиоактивен: следи за дозой.',
+  vault13: 'Прихожая, атриум с колонной, каюты на севере, логово на юге. Кабинет смотрителя — на востоке.',
   den: 'Гильдия работорговцев — на севере. Клетка с пленником — рядом. В юго-восточном переулке опасно. Выход — на запад.',
 };
 
@@ -426,6 +429,7 @@ export class UI {
           <div class="row"><span>Дата</span><span class="v">${g.dateText(g.days, true)}</span></div>
           <div class="row"><span>Местность</span><span class="v">${esc(g.location.name)}</span></div>
           <div class="row"><span>Координаты</span><span class="v">${g.player.pos.x.toFixed(0)}, ${g.player.pos.z.toFixed(0)}</span></div>
+          <div class="row"><span>Радиация</span><span class="v">${Math.round(g.char.rads)} рад${g.char.radPenalty ? ` (−${g.char.radPenalty} ОД)` : ''}</span></div>
           <div class="row"><span>Убито врагов</span><span class="v">${g.kills}</span></div>
           <h3 style="margin-top:12px">Заметки</h3>
           <div>${esc(LOCATION_NOTES[g.location.id] ?? 'Опасная пустошь. Уйти можно через любой край карты.')}</div>

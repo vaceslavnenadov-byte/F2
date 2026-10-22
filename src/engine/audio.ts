@@ -1,6 +1,6 @@
 // Процедурный звук: всё синтезируется через Web Audio, без аудиофайлов.
 
-export type Sfx = 'step' | 'swing' | 'miss' | 'hit' | 'shot' | 'bite' | 'death' | 'click' | 'levelup' | 'quest' | 'heal' | 'coins' | 'hurt';
+export type Sfx = 'geiger' | 'step' | 'swing' | 'miss' | 'hit' | 'shot' | 'bite' | 'death' | 'click' | 'levelup' | 'quest' | 'heal' | 'coins' | 'hurt';
 export type MusicMode = 'explore' | 'combat' | 'off';
 
 const A_MINOR_PENTA = [57, 60, 62, 64, 67, 69, 72, 74, 76]; // MIDI
@@ -142,6 +142,9 @@ export class AudioEngine {
     } else out.connect(this.sfxBus);
 
     switch (name) {
+      case 'geiger':
+        this.noiseBurst(out, t, 0.012, 'highpass', 3000, 0.5, 0.001);
+        break;
       case 'step':
         this.noiseBurst(out, t, 0.07, 'lowpass', 600 + Math.random() * 300, 0.25);
         break;
