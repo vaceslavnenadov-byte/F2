@@ -123,6 +123,18 @@ export const ITEMS: Record<string, ItemDef> = {
   fakePapers: { id: 'fakePapers', name: 'Поддельные документы', kind: 'misc', value: 450, desc: 'Направление новобранца на базу Наварро. Печать почти настоящая.' },
   keycard: { id: 'keycard', name: 'Ключ-карта Анклава', kind: 'misc', value: 0, desc: 'Карта доступа офицера платформы.' },
   fobCode: { id: 'fobCode', name: 'Код опознавания', kind: 'misc', value: 0, desc: 'Код «свой-чужой» для подхода к платформе Анклава.' },
+  shotgun: {
+    id: 'shotgun', name: 'Дробовик', kind: 'weapon', value: 450,
+    desc: 'Двуствольный дробовик. Вблизи сносит с ног.',
+    weapon: { skill: 'smallGuns', dmg: [10, 22], ap: 5, range: 10, melee: false, ammo: 'shells', visual: 'rifle' },
+  },
+  shells: { id: 'shells', name: 'Дробь 12 калибра', kind: 'ammo', value: 3, desc: 'Патроны для дробовика.' },
+  brassKnuckles: {
+    id: 'brassKnuckles', name: 'Кастет', kind: 'weapon', value: 150,
+    desc: 'Тяжёлый кастет с ринга Нью-Рино. Удар без оружия, но с весом.',
+    weapon: { skill: 'unarmed', dmg: [4, 10], ap: 3, range: 1.5, melee: true, visual: 'none' },
+  },
+  ledger: { id: 'ledger', name: 'Бухгалтерия Карвера', kind: 'misc', value: 0, desc: 'Толстая книга с долгами и взятками семьи Карвер.' },
   regulator: { id: 'regulator', name: 'Регулятор потока', kind: 'misc', value: 0, desc: 'Тяжёлая деталь реактора, обмотанная изолентой. Нужна в Гекко.' },
   v13coords: { id: 'v13coords', name: 'Голодиск Убежища 8', kind: 'misc', value: 0, desc: 'Голодиск с координатами довоенных убежищ, включая Убежище 13.' },
   geck: { id: 'geck', name: 'ГЭКК', kind: 'misc', value: 0, desc: 'Генератор Эдемского Комплекса Колонизации. Чемодан, способный превратить пустошь в сад.' },
@@ -143,6 +155,8 @@ export const TRADERS: Record<string, { name: string; stock: [string, number][] }
   vcdoctor: { name: 'Доктор Андерс', stock: [['caps', 400], ['stimpak', 8], ['radaway', 6], ['radx', 6]] },
   gecko: { name: 'Лорин', stock: [['caps', 250], ['radaway', 4], ['radx', 5], ['ammo10', 20], ['ammo5', 20], ['powder', 2]] },
   rico: { name: 'Контрабандист Рико', stock: [['caps', 700], ['fakePapers', 1], ['ammo5', 60], ['microcell', 12], ['stimpak', 6], ['radaway', 2], ['leatherArmor', 1]] },
+  betty: { name: 'Бетти', stock: [['caps', 400], ['shells', 40], ['shotgun', 1], ['radaway', 3], ['radx', 3], ['stimpak', 3], ['leatherArmor', 1]] },
+  renoBar: { name: 'Бар «Подкова»', stock: [['caps', 500], ['shells', 30], ['ammo10', 40], ['stimpak', 4], ['pistol10', 1], ['knife', 2]] },
   becky: {
     name: 'Бекки',
     stock: [['caps', 600], ['ammo10', 50], ['ammo223', 30], ['pistol10', 1], ['huntingRifle', 1], ['leatherArmor', 1], ['metalArmor', 1], ['stimpak', 4], ['powder', 2], ['knife', 1]],
@@ -170,6 +184,8 @@ export class Inventory {
   items = new Map<string, number>();
   equipped: string | null = null;
   armor: string | null = null;
+  /** Скидка ОД на выстрел (способность «Скорострел»). */
+  rangedApBonus = 0;
 
   add(id: string, n = 1) { this.items.set(id, (this.items.get(id) ?? 0) + n); }
   count(id: string) { return this.items.get(id) ?? 0; }
@@ -183,7 +199,10 @@ export class Inventory {
     } else this.items.set(id, c - n);
     return true;
   }
-  get weapon(): WeaponStats { return (this.equipped && ITEMS[this.equipped].weapon) || FISTS; }
+  get weapon(): WeaponStats {
+    const w = (this.equipped && ITEMS[this.equipped].weapon) || FISTS;
+    return !w.melee && this.rangedApBonus ? { ...w, ap: Math.max(2, w.ap - this.rangedApBonus) } : w;
+  }
   get weaponName(): string { return this.equipped ? ITEMS[this.equipped].name : 'Кулаки'; }
   get armorStats(): ArmorStats | null { return this.armor ? ITEMS[this.armor].armor! : null; }
 

@@ -37,7 +37,8 @@ export class Combat {
     // В бой вступают только те, кто рядом; остальные подтягиваются, когда игрок подойдёт к ним.
     this.participants = [
       p,
-      ...game.party,
+      // На ринге спутники не вмешиваются.
+      ...(game.flags.has('inBout') ? [] : game.party),
       // Союзные неподвижные помощники (перепрограммированные турели).
       ...game.actors.filter((a) => a.faction === 'companion' && !a.follow && !a.dead && a.speed === 0 && a.distanceTo(p) < 30),
       ...game.actors.filter((a) => a.faction === 'hostile' && !a.dead && a.distanceTo(p) < a.detectRadius + 3),
@@ -149,6 +150,7 @@ export class Combat {
     const isPlayer = attacker === g.player;
     let chance = (isPlayer ? g.char.skill(w.skill) : attacker.skill) - (target === g.player ? g.playerAC : target.ac) + BODY_PARTS[part].mod;
     if (attacker.crippled.has('arm')) chance -= 20;
+    if (isPlayer && !w.melee && g.char.has('sniper')) chance += 15;
     if (!w.melee) {
       const pe = isPlayer ? g.char.special.pe : 5;
       chance -= Math.max(0, attacker.distanceTo(target) - pe * 1.5) * 4;
@@ -306,6 +308,8 @@ export class Combat {
     const friendly = a.faction === 'companion';
     let guard = 0;
     while (a.ap > 0 && !g.player.dead && !a.dead && guard++ < 10) {
+      // Сдавшийся или замирившийся (нокаут на ринге) больше не атакует.
+      if (a.faction !== 'hostile' && a.faction !== 'companion') break;
       const targets = friendly ? this.hostilesLeft() : this.allies();
       if (!targets.length) break;
       const t = targets.reduce((best, x) => (a.distanceTo(x) < a.distanceTo(best) ? x : best));

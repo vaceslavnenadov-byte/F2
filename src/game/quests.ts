@@ -69,6 +69,19 @@ export const QUESTS: Record<string, { title: string; desc: (q: QuestState) => st
           ? 'Супермутанты перебиты. Вернись к механику Ли.'
           : `Механик Ли заправит танкер, если выбить супермутантов с топливного склада. Убито: ${q.progress}/3.`,
   },
+  families: {
+    title: 'Бухгалтерия Карвера',
+    desc: (q) => (q.state === 'rewarded' ? 'Бухгалтерия Карвера сменила хозяина. Нью-Рино запомнит твой выбор.' : 'Луиджи Морелли хочет бухгалтерскую книгу из сейфа Джека Карвера (двор на востоке). Можно отдать её Морелли — или вернуть Карверу.'),
+  },
+  boxing: {
+    title: 'Ринг Нью-Рино',
+    desc: (q) => (q.state === 'rewarded' ? 'Ты — чемпион Нью-Рино!' : `Победи трёх бойцов на ринге Быка Томми (только кулаки). Побед: ${q.progress}/3.`),
+  },
+  scorpions: {
+    title: 'Шахта Брокен-Хиллз',
+    desc: (q) =>
+      q.state === 'rewarded' ? 'Шахта очищена, шахтёры работают.' : q.state === 'done' ? 'Радскорпионы перебиты. Вернись к шерифу Маркусу.' : `Шериф Маркус просит перебить радскорпионов у входа в шахту. Убито: ${q.progress}/4.`,
+  },
   rats: {
     title: 'Крысы на складе',
     desc: (q) =>
@@ -84,5 +97,6 @@ export const QUESTS: Record<string, { title: string; desc: (q: QuestState) => st
 export const QUEST_GOALS: Record<string, { tag: string; count: number; doneText: string }> = {
   geckos: { tag: 'nest', count: 5, doneText: 'Гнездо уничтожено. Вернись к Старейшине.' },
   rats: { tag: 'rats', count: 4, doneText: 'Крысы у склада перебиты. Вернись к Мэйде.' },
+  scorpions: { tag: 'scorp', count: 4, doneText: 'Радскорпионы перебиты. Вернись к Маркусу.' },
   mutants: { tag: 'mutants', count: 3, doneText: 'Склад отбит у мутантов. Вернись к механику Ли.' },
 };

@@ -164,3 +164,47 @@ export function vcGuard(id: string): Actor {
     hp: 70, ap: 8, ac: 25, skill: 80, attack: ATTACKS.pistol, dt: 5, dr: 0.4,
   });
 }
+
+// ─── Нью-Рино и Брокен-Хиллз ──────────────────────────────────────────────
+
+export const SHOTGUN: WeaponStats = { skill: 'smallGuns', dmg: [10, 22], ap: 5, range: 10, melee: false, visual: 'rifle' };
+
+/** Кэссиди: старый стрелок с дробовиком и больным сердцем. */
+export function cassidy(): Actor {
+  return human('cassidy', 'Кэссиди', { skin: SKIN.pale, cloth: '#3a3026', hair: '#9a948a', beard: true, build: 1.05, armor: 'jacket' }, 'rifle', {
+    dialogue: 'cassidy', hp: 55, ap: 8, ac: 10, skill: 72, attack: SHOTGUN, sequence: 8, speed: 3.4, dt: 1, dr: 0.15,
+  });
+}
+
+/** Маркус: шериф Брокен-Хиллз, добродушный супермутант с пулемётом. */
+export function marcus(): Actor {
+  return human('marcus', 'Маркус', { skin: '#74845a', cloth: '#4a3a28', hair: '#74845a', top: '#5a4632', build: 1.75, scale: 1.35 }, 'rifle', {
+    dialogue: 'marcus', hp: 130, ap: 8, ac: 14, skill: 70, sequence: 7, speed: 3.4, dt: 4, dr: 0.25,
+    attack: { skill: 'smallGuns', dmg: [12, 24], ap: 5, range: 18, melee: false, visual: 'rifle' },
+  });
+}
+
+export function radscorpion(id: string, tag?: string): Actor {
+  return new Actor({
+    id, name: 'Радскорпион', faction: 'hostile', rig: new LizardRig('#5e2c20', '#9a6a44', 1.25), hp: 32, ap: 7, ac: 8, skill: 55,
+    attack: { skill: 'unarmed', dmg: [4, 12], ap: 4, range: 1.7, melee: true, visual: 'none' },
+    xp: 160, sequence: 7, speed: 3.6, tag, dt: 2, dr: 0.2, wanderRadius: 4, detectRadius: 9, loot: [],
+  });
+}
+
+/** Гангстер одной из семей Нью-Рино: костюм и пистолет. */
+export function gangster(id: string, family: 'morelli' | 'carver', variant = 0): Actor {
+  const suit = family === 'morelli' ? '#2a2a34' : '#3a2a24';
+  return human(id, family === 'morelli' ? 'Боевик Морелли' : 'Боевик Карвера', {
+    skin: [SKIN.pale, SKIN.a, SKIN.b][variant % 3], cloth: suit, hair: '#141010', top: suit, build: 1.05,
+  }, 'gun', { hp: 45, ap: 8, ac: 10, skill: 65, attack: ATTACKS.pistol, xp: 150, sequence: 7, dt: 1, dr: 0.1, dialogue: 'goon', loot: [['caps', 20, 60], ['ammo10', 2, 8]] });
+}
+
+export const FISTS_PRO: WeaponStats = { skill: 'unarmed', dmg: [3, 8], ap: 3, range: 1.5, melee: true, visual: 'none' };
+
+/** Боксёр с ринга: бьёт только кулаками. */
+export function boxer(id: string, name: string, tier: number): Actor {
+  return human(id, name, { skin: [SKIN.b, SKIN.pale, SKIN.c][tier % 3], cloth: ['#8a1a1a', '#1a3a8a', '#1a1a1a'][tier % 3], hair: '#141010', build: 1.1 + tier * 0.1 }, 'none', {
+    hp: 30 + tier * 15, ap: 7 + tier, ac: 8 + tier * 3, skill: 55 + tier * 10, attack: { ...FISTS_PRO, dmg: [3 + tier, 8 + tier * 2] }, xp: 120 + tier * 80, dialogue: 'boxer', tag: 'boxer',
+  });
+}

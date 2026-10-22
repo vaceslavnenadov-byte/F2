@@ -13,14 +13,15 @@ import { makeEncounter, ENCOUNTER_NAMES, type EncounterKind } from '../world/loc
 import type { LocationDef } from '../world/locations/types';
 import { Actor } from '../entities/actor';
 import { HumanoidRig, LizardRig, QuadrupedRig } from '../entities/rigs';
-import { Character, type SkillId } from './character';
+import { Character, PERKS, type PerkId, type SkillId } from './character';
 import { Inventory, ITEMS, TRADERS, priceMult, itemPrice } from './items';
 import { Combat, BODY_PARTS, AIM_AP, type BodyPart } from './combat';
 import { DIALOGUES, resolveText, type DialogueDef, type DialogueOption } from './dialogues';
 import { QUESTS, QUEST_GOALS, type QuestState } from './quests';
-import { dog as makeDog, sulik as makeSulik, colonel } from './bestiary';
+import { dog as makeDog, sulik as makeSulik, cassidy as makeCassidy, marcus as makeMarcus, colonel } from './bestiary';
 import { OIL_RIG, RIG_DOCK, RIG_SOLDIERS } from '../world/locations/oilrig';
 import { NAVARRO_SOLDIERS } from '../world/locations/navarro';
+import { MORELLI_IDS, CARVER_IDS } from '../world/locations/newreno';
 import { UI } from '../ui/ui';
 import { showWorldMap } from '../ui/worldmap';
 
@@ -209,7 +210,7 @@ export class Game {
       a.stop();
       this.r.scene.remove(a.object);
       // Персистентные актёры (игрок, отряд, пёс) живут между локациями.
-      if (a !== this.player && a !== this.dog && !party.includes(a)) {
+      if (a !== this.player && a !== this.dog && !party.includes(a) && ![...this.companionActors.values()].includes(a)) {
         a.object.traverse((o) => {
           const m = o as THREE.Mesh;
           m.geometry?.dispose();
@@ -251,6 +252,7 @@ export class Game {
     this.addActor(this.player, x, z);
     party.forEach((a, i) => this.addActor(a, x + Math.cos(i * 2 + 1) * 1.8, z + Math.sin(i * 2 + 1) * 1.8));
     def.spawn(this);
+    this.spawnWaitingCompanions(def.id);
     this.camTarget.copy(this.player.pos);
     this.exitArmed = false;
   }
@@ -288,6 +290,7 @@ export class Game {
       days: this.days,
       discovered: [...this.discovered],
       here,
+      onDiscover: (id) => this.discover(id),
       dateText: (d) => this.dateText(d, true),
       encounterCheck: (dist) => {
         encounterBudget += dist;
@@ -347,6 +350,7 @@ export class Game {
     this.player.maxHp = this.char.maxHp;
     this.player.ap = this.player.maxAp = this.char.maxAp;
     this.updatePlayerLook();
+    this.applyPerks();
     this.camTarget.copy(this.player.pos);
     this.ui.showHud(true);
     this.ui.updateHud();
@@ -440,7 +444,10 @@ export class Game {
     // Восстанавливаем отряд до входа в локацию, чтобы он появился рядом с игроком.
     const restored: Actor[] = [];
     if (this.flags.has('dogFound') && this.quests.dog?.state !== 'rewarded' && !this.flags.has('dogDead')) restored.push(this.dog);
-    if (this.flags.has('sulikJoined') && !this.flags.has('sulikDead')) restored.push(makeSulik());
+    for (const id of Object.keys(this.companionFactories)) {
+      if (!this.isJoined(id) || this.flags.has(`${id}Dead`) || this.isWaiting(id)) continue;
+      restored.push(this.companion(id));
+    }
     for (const a of restored) this.joinParty(a);
     this.actors = [...new Set([...this.actors, ...restored])];
     if (d.loc.id === 'encounter' && d.loc.kind && d.loc.seed !== undefined) {
@@ -488,6 +495,8 @@ export class Game {
       this.ui.banner('НОВЫЙ УРОВЕНЬ!', 2.5);
       audio.play('levelup');
       this.ui.log(`Уровень ${this.char.level}! Очки навыков: +${this.char.skillPointsPerLevel}. Распредели их в окне персонажа (C).`, 'warn');
+      if (this.char.perkPoints > 0) this.ui.log('Доступна новая способность! Выбери её в окне персонажа (C).', 'warn');
+      this.applyPerks();
     }
     this.ui.updateHud();
   }
@@ -537,13 +546,74 @@ export class Game {
     (this.dog.rig as QuadrupedRig).wag = 0.3;
   }
 
-  recruitSulik() {
-    const s = this.actors.find((a) => a.id === 'sulik');
-    if (!s) return;
-    this.flags.add('sulikJoined');
-    this.joinParty(s);
-    this.ui.log('Сулик присоединяется к отряду.', 'good');
-    this.ui.banner('СУЛИК В ОТРЯДЕ', 2);
+  recruitSulik() { this.recruit('sulik'); }
+
+  // ─── Отряд ─────────────────────────────────────────────────────────────────
+
+  /** Нанимаемые спутники: создаются один раз и живут между локациями. */
+  private companionFactories: Record<string, () => Actor> = { sulik: makeSulik, cassidy: makeCassidy, marcus: makeMarcus };
+  private companionActors = new Map<string, Actor>();
+
+  private joinedFlag(id: string) { return id === 'sulik' ? 'sulikJoined' : `joined:${id}`; }
+  isJoined(id: string) { return this.flags.has(this.joinedFlag(id)); }
+
+  private companion(id: string): Actor {
+    let a = this.companionActors.get(id);
+    if (!a) {
+      a = this.actors.find((x) => x.id === id) ?? this.companionFactories[id]();
+      this.companionActors.set(id, a);
+    }
+    return a;
+  }
+
+  /** Нанять спутника, стоящего в текущей локации. */
+  recruit(id: string) {
+    const a = this.actors.find((x) => x.id === id);
+    if (!a) return;
+    this.companionActors.set(id, a);
+    this.flags.add(this.joinedFlag(id));
+    this.joinParty(a);
+    this.ui.log(`${a.name}: присоединяется к отряду.`, 'good');
+    this.ui.banner(`${a.name.toUpperCase()} В ОТРЯДЕ`, 2);
+  }
+
+  private clearWait(id: string) {
+    for (const f of [...this.flags]) if (f.startsWith(`wait:${id}:`)) this.flags.delete(f);
+  }
+
+  /** Спутник остаётся в этой локации, пока за ним не вернутся. */
+  companionWait(a: Actor) {
+    this.clearWait(a.id);
+    a.follow = null;
+    a.stop();
+    a.home.copy(a.pos);
+    a.wanderRadius = 2;
+    this.flags.add(`wait:${a.id}:${this.location.id}`);
+    this.ui.log(`${a.name} ждёт здесь.`);
+  }
+
+  companionFollow(a: Actor) {
+    this.clearWait(a.id);
+    this.joinParty(a);
+    this.ui.log(`${a.name} снова идёт с тобой.`);
+  }
+
+  isWaiting(id: string) { return [...this.flags].some((f) => f.startsWith(`wait:${id}:`)); }
+
+  /** Спутники, оставленные ждать в этой локации. */
+  private spawnWaitingCompanions(locId: string) {
+    for (const f of this.flags) {
+      const m = /^wait:(\w+):(\w+)$/.exec(f);
+      if (!m || m[2] !== locId || this.flags.has(`${m[1]}Dead`)) continue;
+      const a = this.companion(m[1]);
+      if (this.actors.includes(a)) continue;
+      a.faction = 'companion';
+      a.follow = null;
+      a.wanderRadius = 2;
+      const [x, z] = this.location.entries.default;
+      this.addActor(a, a.home.x || x + 2, a.home.z || z + 2);
+      a.home.copy(a.pos);
+    }
   }
 
   /** Метка «кто-то ушёл из локации навсегда» (освобождённый Вик). */
@@ -603,7 +673,25 @@ export class Game {
   get playerAC() { return this.char.ac + (this.inv.armorStats?.ac ?? 0); }
   get playerArmor() {
     const a = this.inv.armorStats;
-    return { dt: a?.dt ?? 0, dr: a?.dr ?? 0 };
+    const tough = this.char.has('toughness');
+    return { dt: (a?.dt ?? 0) + (tough ? 2 : 0), dr: Math.min(0.9, (a?.dr ?? 0) + (tough ? 0.1 : 0)) };
+  }
+
+  /** Выбор способности из окна персонажа. */
+  takePerk(id: PerkId) {
+    if (!this.char.takePerk(id)) return;
+    const def = PERKS.find((p) => p.id === id)!;
+    this.ui.log(`Новая способность: «${def.name}».`, 'good');
+    audio.play('levelup');
+    this.applyPerks();
+  }
+
+  /** Производные от способностей значения, которые хранятся не в персонаже. */
+  private applyPerks() {
+    this.inv.rangedApBonus = this.char.has('fastShot') ? 1 : 0;
+    this.player.hp = this.char.hp;
+    this.player.maxHp = this.char.maxHp;
+    this.syncAp();
   }
 
   equipArmor(id: string | null) {
@@ -672,7 +760,7 @@ export class Game {
         return;
       }
     }
-    const amount = randInt(def.heal[0], def.heal[1]);
+    const amount = Math.round(randInt(def.heal[0], def.heal[1]) * (this.char.has('healer') ? 1.5 : 1));
     const healed = Math.min(amount, this.char.maxHp - this.char.hp);
     this.char.hp += healed;
     this.player.hp = this.char.hp;
@@ -705,6 +793,7 @@ export class Game {
     }
     if (rate <= 0) return;
     if (this.days < this.radxUntil) rate *= 0.5;
+    if (this.char.has('radResist')) rate *= 0.5;
     const before = this.char.radPenalty;
     this.char.rads += rate * dt;
     // Счётчик Гейгера трещит тем чаще, чем выше фон.
@@ -814,6 +903,13 @@ export class Game {
     if (target === this.player) {
       this.char.hp -= dmg;
       target.hp = this.char.hp;
+      // На ринге проигрывают нокаутом, а не смертью.
+      if (this.char.hp <= 0 && this.flags.has('inBout')) {
+        this.char.hp = 1;
+        target.hp = 1;
+        this.loseBout(attacker);
+        return;
+      }
     } else target.hp -= dmg;
     const isLizard = target.rig instanceof LizardRig;
     this.effects.hit(target, attacker.pos, isLizard ? new THREE.Color(0.25, 0.3, 0.05) : undefined);
@@ -848,6 +944,16 @@ export class Game {
     for (const [id, min, max] of target.loot) {
       const n = randInt(min, max);
       if (n > 0) this.giveItem(id, n);
+    }
+    if (target.tag === 'boxer') {
+      const n = Number(target.id.replace('boxer', ''));
+      this.flags.add(`boutWon${n}`);
+      this.flags.add('boutPrizeDue');
+      this.flags.delete('inBout');
+      this.ui.banner('НОКАУТ!', 2);
+      this.ui.log(`${target.name} в нокауте! Забери приз у Быка Томми.`, 'good');
+      this.questKills.boxing = (this.questKills.boxing ?? 0) + 1;
+      if (this.quests.boxing) this.quests.boxing.progress = this.questKills.boxing;
     }
     if (target.id === 'colonel') {
       this.flags.add('colonelDead');
@@ -948,6 +1054,20 @@ export class Game {
     const sci = this.char.skill('science');
     const card = this.inv.count('keycard') > 0;
     switch (it.id) {
+      case 'carverSafe': {
+        if (this.flags.has('ledgerTaken')) break;
+        // Охрана рядом — заметят.
+        const guards = this.actors.filter((a) => CARVER_IDS.includes(a.id) && !a.dead && a.faction !== 'hostile' && a.distanceTo(this.player) < 9);
+        this.flags.add('ledgerTaken');
+        this.giveItem('ledger');
+        this.removeInteractable(it);
+        it.object.visible = false;
+        if (guards.length) {
+          this.ui.log('Охрана Карвера замечает вас у сейфа!', 'bad');
+          this.makeHostile('carver');
+        } else this.ui.log('Сейф открыт тихо. Никто ничего не заметил.', 'good');
+        break;
+      }
       case 'navTerminal':
         if (this.inv.count('fobCode')) {
           this.ui.log('Код опознавания уже у тебя.');
@@ -1209,15 +1329,93 @@ export class Game {
     if (this.quests.dog?.state === 'rewarded' && !this.dog.dead) fates.push('Дымок дожил до седой морды у очага Нагора.');
     if (f.has('sulikJoined') && !f.has('sulikDead')) fates.push('Сулик вернулся в своё племя с рассказами о походах. Дедушка, говорят, одобрил.');
     if (f.has('vicFree')) fates.push('Вик открыл лавку в Убежище-Сити и до старости торговал с племенем Арройо.');
+    if (this.isJoined('cassidy') && !f.has('cassidyDead')) fates.push('Кэссиди так и не бросил пить, но сердце его пережило ещё много дорог.');
+    if (this.isJoined('marcus') && !f.has('marcusDead')) fates.push('Маркус вернулся в Брокен-Хиллз и до конца дней оставался его шерифом.');
     if (fates.length) slides.push(fates.join(' '));
     slides.push(f.has('reactorFixed')
       ? 'Убежище-Сити и Гекко заключили хрупкий мир: чистая энергия гулей в обмен на лекарства граждан.'
       : 'Ссора Убежище-Сити и Гекко переросла в войну, и ни один из городов так и не оправился.');
+    if (f.has('sidedMorelli')) slides.push('Без бухгалтерии Карвер быстро пал. Нью-Рино стал вотчиной семьи Морелли — и ещё на шаг ближе к тому, чтобы стать столицей пороков всей пустоши.');
+    else if (f.has('sidedCarver')) slides.push('Семья Карвер вернула свои книги и вытеснила Морелли. Новый порядок в Нью-Рино оказался ничуть не лучше старого.');
+    if (this.quests.scorpions?.state === 'rewarded') slides.push('Шахта Брокен-Хиллз снова давала руду. Город, где люди, гули и мутанты живут вместе, процветал назло всем предсказаниям.');
     if (f.has('clawsAllow')) slides.push('Когти смерти Убежища 13 жили тихо. Путники рассказывали о разумных чудовищах, которые не трогают людей.');
     else if (f.has('deathclawsHostile')) slides.push('Убежище 13 опустело навсегда. Ветер гоняет пыль по его залам.');
     const days = Math.max(1, Math.floor(this.days));
     slides.push(`${this.char.name} стал легендой пустоши. Уровень ${this.char.level}, побеждено врагов: ${this.kills}, ${days} ${plural(days, 'день', 'дня', 'дней')} в пути.`);
     return slides;
+  }
+
+  // ─── Нью-Рино ──────────────────────────────────────────────────────────────
+
+  lastGamble = '';
+
+  /** Кости в «Десятке»: шанс выигрыша растёт с Удачей. */
+  gamble(bet: number) {
+    if (this.inv.count('caps') < bet) return;
+    const chance = 0.42 + (this.char.special.lk - 5) * 0.03 + (this.char.has('lucky') ? 0.05 : 0);
+    const win = Math.random() < chance;
+    const d6 = () => 1 + Math.floor(Math.random() * 6);
+    let mine = [d6(), d6()];
+    let house = [d6(), d6()];
+    // Подбираем броски, совпадающие с исходом (ничья — заведению).
+    for (let i = 0; i < 50 && (mine[0] + mine[1] > house[0] + house[1]) !== win; i++) {
+      mine = [d6(), d6()];
+      house = [d6(), d6()];
+    }
+    const roll = `Ваши кости: ${mine[0]} и ${mine[1]}. У заведения: ${house[0]} и ${house[1]}.`;
+    if (win) {
+      this.inv.add('caps', bet);
+      this.lastGamble = `${roll} Вы выиграли ${bet} крышек!`;
+      audio.play('coins');
+    } else {
+      this.inv.remove('caps', bet);
+      this.lastGamble = `${roll} Заведение забирает ${bet} крышек.`;
+    }
+    this.ui.log(this.lastGamble, win ? 'good' : '');
+    this.ui.updateHud();
+  }
+
+  startBout() {
+    const b = this.actors.find((a) => a.tag === 'boxer' && !a.dead);
+    if (!b) return;
+    this.startQuest('boxing');
+    this.flags.add('inBout');
+    this.ui.banner('БОЙ НА РИНГЕ', 1.5);
+    this.turnHostile([b.id]);
+  }
+
+  private loseBout(boxer: Actor) {
+    this.flags.delete('inBout');
+    boxer.faction = 'villager';
+    boxer.detectRadius = 0;
+    boxer.dialogue = 'boxer';
+    boxer.hp = boxer.maxHp;
+    this.ui.banner('НОКАУТ', 2);
+    this.ui.log('Вы в нокауте! Бой проигран. Отлежитесь и попробуйте снова.', 'bad');
+    this.combat?.abort();
+  }
+
+  collectBoutPrize(prizes: number[]) {
+    this.flags.delete('boutPrizeDue');
+    const won = [0, 1, 2].filter((i) => this.flags.has(`boutWon${i}`)).length;
+    this.giveItem('caps', prizes[won - 1] ?? 100);
+    if (won >= 3) {
+      this.giveItem('brassKnuckles');
+      if (this.quests.boxing) this.quests.boxing.state = 'rewarded';
+      this.ui.banner('ЧЕМПИОН НЬЮ-РИНО', 2.5);
+    }
+  }
+
+  /** Семья Нью-Рино становится враждебной (после предательства). */
+  makeHostile(family: 'morelli' | 'carver') {
+    this.flags.add(`${family}Hostile`);
+    const ids = family === 'morelli' ? MORELLI_IDS : CARVER_IDS;
+    for (const a of this.actors) {
+      if (!ids.includes(a.id) || a.dead) continue;
+      a.faction = 'hostile';
+      a.dialogue = undefined;
+      a.detectRadius = 14;
+    }
   }
 
   /** Пропуск в Убежище-Сити: ворота открываются. */
@@ -1410,7 +1608,10 @@ export class Game {
         const s = a.rig instanceof QuadrupedRig && a.rig.height > 1.2 ? 1.6 : a.rig.height < 1 ? 0.9 : 1;
         this.hoverRing.scale.setScalar(s);
         tip = `${a.name}`;
-        if (a.faction === 'hostile' || a.faction === 'companion') tip += ` — ${this.healthWord(a)}`;
+        if (a.faction === 'hostile' || a.faction === 'companion') {
+          tip += this.char.has('awareness') ? ` — ОЗ ${Math.max(0, a.hp)}/${a.maxHp}` : ` — ${this.healthWord(a)}`;
+          if (this.char.has('awareness') && a.attack) tip += `, урон ${a.attack.dmg[0]}–${a.attack.dmg[1]}`;
+        }
         if (a.faction === 'hostile' && this.combat?.isPlayerTurn) {
           const w = this.inv.weapon;
           const plan = this.combat.planPlayerAttack(a, this.aimMode ? 'head' : 'torso');
@@ -1537,7 +1738,7 @@ export class Game {
     this.location.update?.(this, dt);
 
     this.regenAcc += dt;
-    if (this.regenAcc > 8) {
+    if (this.regenAcc > (this.char.has('healer') ? 4 : 8)) {
       this.regenAcc = 0;
       if (this.char.hp < this.char.maxHp) {
         this.char.hp++;

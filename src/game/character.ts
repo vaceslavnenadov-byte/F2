@@ -29,6 +29,24 @@ export type SkillId = (typeof SKILLS)[number]['id'];
 
 export const SPECIAL_POOL = 40;
 
+/** Способности: одна на каждый нечётный уровень начиная с 3-го. */
+export const PERKS = [
+  { id: 'lifegiver', name: 'Жизнелюб', desc: '+12 к максимуму очков здоровья.' },
+  { id: 'actionBoy', name: 'Ловкач', desc: '+1 очко действия в каждом ходу.' },
+  { id: 'toughness', name: 'Толстокожий', desc: 'Порог урона +2 и сопротивление +10% поверх брони.' },
+  { id: 'sniper', name: 'Меткий глаз', desc: '+15% к шансу попадания из стрелкового оружия.' },
+  { id: 'fastShot', name: 'Скорострел', desc: 'Выстрел из любого стрелкового оружия стоит на 1 ОД меньше.' },
+  { id: 'brute', name: 'Громила', desc: '+4 к урону в ближнем бою.' },
+  { id: 'lucky', name: 'Счастливчик', desc: '+10% к шансу критического попадания.' },
+  { id: 'healer', name: 'Быстрое заживление', desc: 'Раны затягиваются вдвое быстрее, лечебные средства — на 50% сильнее.' },
+  { id: 'radResist', name: 'Иммунитет', desc: 'Организм набирает вдвое меньше радиации.' },
+  { id: 'awareness', name: 'Наблюдательность', desc: 'Видно точное здоровье врагов и их оружие.' },
+  { id: 'orator', name: 'Оратор', desc: '+20% к Красноречию.' },
+  { id: 'trader', name: 'Торгаш', desc: '+20% к Бартеру.' },
+  { id: 'tinker', name: 'Технарь', desc: '+15% к Науке и Ремонту.' },
+] as const;
+export type PerkId = (typeof PERKS)[number]['id'];
+
 export class Character {
   name = 'Избранный';
   special: Special = { st: 5, pe: 5, en: 5, ch: 5, in: 5, ag: 5, lk: 5 };
@@ -40,24 +58,48 @@ export class Character {
   hp = 0;
   /** Накопленная доза радиации. */
   rads = 0;
+  perks = new Set<PerkId>();
+  perkPoints = 0;
+
+  has(p: PerkId) { return this.perks.has(p); }
+
+  private perkSkillBonus(id: SkillId) {
+    let b = 0;
+    if (id === 'speech' && this.has('orator')) b += 20;
+    if (id === 'barter' && this.has('trader')) b += 20;
+    if ((id === 'science' || id === 'repair') && this.has('tinker')) b += 15;
+    return b;
+  }
 
   skill(id: SkillId): number {
     const def = SKILLS.find((s) => s.id === id)!;
     const tag = this.tags.has(id);
     // Отмеченный навык: +20 сразу и двойная отдача от вложенных очков.
-    return def.base(this.special) + (tag ? 20 : 0) + this.spent[id] * (tag ? 2 : 1);
+    return def.base(this.special) + (tag ? 20 : 0) + this.spent[id] * (tag ? 2 : 1) + this.perkSkillBonus(id);
   }
 
-  get maxHp() { return 15 + this.special.st + 2 * this.special.en + (this.level - 1) * (2 + Math.floor(this.special.en / 2)); }
+  get maxHp() {
+    return 15 + this.special.st + 2 * this.special.en + (this.level - 1) * (2 + Math.floor(this.special.en / 2)) + (this.has('lifegiver') ? 12 : 0);
+  }
   /** Лучевая болезнь: каждые 200 рад отнимают 1 ОД (максимум 3). */
   get radPenalty() { return Math.min(3, Math.floor(this.rads / 200)); }
-  get maxAp() { return 5 + Math.floor(this.special.ag / 2) - this.radPenalty; }
+  get maxAp() { return 5 + Math.floor(this.special.ag / 2) - this.radPenalty + (this.has('actionBoy') ? 1 : 0); }
   get ac() { return this.special.ag; }
-  get meleeBonus() { return Math.max(1, this.special.st - 5); }
+  get meleeBonus() { return Math.max(1, this.special.st - 5) + (this.has('brute') ? 4 : 0); }
   get sequence() { return 2 * this.special.pe; }
-  get critChance() { return this.special.lk; }
+  get critChance() { return this.special.lk + (this.has('lucky') ? 10 : 0); }
   get nextLevelXp() { return ((this.level * (this.level + 1)) / 2) * 1000; }
   get skillPointsPerLevel() { return 5 + 2 * this.special.in; }
+
+  /** Берёт способность; здоровье растёт сразу, если она его увеличивает. */
+  takePerk(p: PerkId): boolean {
+    if (this.perkPoints <= 0 || this.perks.has(p)) return false;
+    const before = this.maxHp;
+    this.perks.add(p);
+    this.perkPoints--;
+    this.hp += this.maxHp - before;
+    return true;
+  }
 
   /** Начисляет опыт, возвращает число полученных уровней. */
   addXp(amount: number): number {
@@ -68,13 +110,14 @@ export class Character {
       this.level++;
       gained++;
       this.skillPoints += this.skillPointsPerLevel;
+      if (this.level % 2 === 1) this.perkPoints++;
       this.hp += this.maxHp - before;
     }
     return gained;
   }
 
   toJSON() {
-    return { name: this.name, special: this.special, tags: [...this.tags], spent: this.spent, level: this.level, xp: this.xp, skillPoints: this.skillPoints, hp: this.hp, rads: this.rads };
+    return { name: this.name, special: this.special, tags: [...this.tags], spent: this.spent, level: this.level, xp: this.xp, skillPoints: this.skillPoints, hp: this.hp, rads: this.rads, perks: [...this.perks], perkPoints: this.perkPoints };
   }
 
   static fromJSON(d: ReturnType<Character['toJSON']>): Character {
@@ -88,6 +131,8 @@ export class Character {
     c.skillPoints = d.skillPoints;
     c.hp = d.hp;
     c.rads = d.rads ?? 0;
+    c.perks = new Set(d.perks ?? []);
+    c.perkPoints = d.perkPoints ?? 0;
     return c;
   }
 }

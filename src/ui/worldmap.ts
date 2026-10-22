@@ -7,6 +7,8 @@ export interface WorldMapOpts {
   discovered: string[];
   /** Город, в котором сейчас стоит игрок (null — посреди пустоши). */
   here: string | null;
+  /** Проезжая рядом с неизвестным местом, игрок его замечает. */
+  onDiscover?: (id: string) => void;
   dateText: (days: number) => string;
   /** Вызывается на каждом отрезке пути; вернуть true — путь прерван встречей. */
   encounterCheck: (distance: number) => boolean;
@@ -221,6 +223,12 @@ export function showWorldMap(container: HTMLElement, o: WorldMapOpts): () => voi
       pos.y = travel.from.y + (t.y - travel.from.y) * k;
       days += (travel.t - prev) * DAYS_PER_UNIT;
       date.textContent = o.dateText(days);
+      for (const [id, p] of Object.entries(WORLD_MAP)) {
+        if (!o.discovered.includes(id) && Math.hypot(p.x - pos.x, p.y - pos.y) < 7) {
+          o.discovered.push(id);
+          o.onDiscover?.(id);
+        }
+      }
       if (travel.t >= travel.len) {
         here = travel.to;
         travel = null;

@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { Character, SKILLS, SPECIAL_INFO, SPECIAL_KEYS, SPECIAL_POOL, type SkillId } from '../game/character';
+import { Character, PERKS, SKILLS, SPECIAL_INFO, SPECIAL_KEYS, SPECIAL_POOL, type PerkId, type SkillId } from '../game/character';
 import { ITEMS, TRADERS, itemPrice } from '../game/items';
 import { QUESTS } from '../game/quests';
 import type { Game } from '../game/game';
@@ -291,6 +291,12 @@ export class UI {
       }
       this.renderPanel();
     });
+    p.querySelectorAll<HTMLElement>('[data-perk]').forEach((el) =>
+      el.addEventListener('click', () => {
+        this.game.takePerk(el.dataset.perk as PerkId);
+        this.renderPanel();
+      }),
+    );
     p.querySelectorAll<HTMLElement>('[data-skill]').forEach((el) =>
       el.addEventListener('click', () => {
         this.game.spendSkillPoint(el.dataset.skill as SkillId);
@@ -412,6 +418,13 @@ export class UI {
           <div class="row"><span>Очки навыков</span><span class="v">${c.skillPoints}</span></div>
           <h3 style="margin-top:12px">Навыки</h3>${skills}
           <div class="desc">■ — отмеченные навыки: +20% и двойная отдача от очков.</div>
+          <h3 style="margin-top:12px">Способности${c.perkPoints ? ` <span class="eq">(доступно: ${c.perkPoints})</span>` : ''}</h3>
+          ${[...c.perks].map((id) => {
+            const p = PERKS.find((x) => x.id === id)!;
+            return `<div class="row" title="${esc(p.desc)}"><span>${esc(p.name)}</span></div>`;
+          }).join('') || '<div class="desc">Пока нет. Первая — на 3-м уровне.</div>'}
+          ${c.perkPoints ? PERKS.filter((p) => !c.perks.has(p.id)).map((p) =>
+            `<div class="item" data-perk="${p.id}"><span>+ ${esc(p.name)}</span><span class="desc" style="margin:0;font-size:15px">${esc(p.desc)}</span></div>`).join('') : ''}
         </div>
       </div>`;
   }
