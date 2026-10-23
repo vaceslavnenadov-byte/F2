@@ -251,3 +251,12 @@ export function wanamingo(id: string, queen = false): Actor {
     wanderRadius: 4, detectRadius: 9, loot: [['wanaSample', 0, 1]],
   });
 }
+
+/** Фрэнк Хорриган: агент Анклава, мутант-гигант в особой силовой броне. */
+export function horrigan(): Actor {
+  return human('horrigan', 'Фрэнк Хорриган', { skin: '#2a2c30', cloth: '#1e2024', hair: '#2a2c30', build: 1.6, scale: 1.45, armor: 'power' }, 'rifle', {
+    faction: 'hostile', hp: 320, ap: 10, ac: 25, skill: 85, speed: 3.2, sequence: 10, xp: 3000, dt: 9, dr: 0.45,
+    attack: { skill: 'smallGuns', dmg: [16, 30], ap: 5, range: 16, melee: false, visual: 'rifle' },
+    detectRadius: 60, wanderRadius: 0, tag: 'enclaveAttack', loot: [['microcell', 20, 30], ['stimpak', 3, 3]],
+  });
+}

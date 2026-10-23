@@ -5,6 +5,7 @@ import { CH3_DIALOGUES } from './dialogues_ch3';
 import { CH4_DIALOGUES, partyOptions } from './dialogues_ch4';
 import { CH5_DIALOGUES } from './dialogues_ch5';
 import { CH6_DIALOGUES } from './dialogues_ch6';
+import { CH7_DIALOGUES } from './dialogues_ch7';
 
 type Text = string | ((g: Game) => string);
 
@@ -537,6 +538,7 @@ export const DIALOGUES: Record<string, DialogueDef> = {
   ...CH4_DIALOGUES,
   ...CH5_DIALOGUES,
   ...CH6_DIALOGUES,
+  ...CH7_DIALOGUES,
 
   villager: {
     start: () => 'talk',

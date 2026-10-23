@@ -24,6 +24,7 @@ import { highwayman } from '../world/props';
 import { SIERRA_GUARDS } from '../world/locations/sierra';
 import { KHAN_IDS } from '../world/locations/vault15';
 import { MARIPOSA_MUTANTS } from '../world/locations/mariposa';
+import { placeVertibird, spawnEnclaveSquad } from '../world/locations/arroyo';
 import { HATCH, SLAG_IDS, spawnKarl, spawnSlags } from '../world/locations/modoc';
 import { NAVARRO_SOLDIERS } from '../world/locations/navarro';
 import { MORELLI_IDS, CARVER_IDS } from '../world/locations/newreno';
@@ -1011,6 +1012,18 @@ export class Game {
       const n = randInt(min, max);
       if (n > 0) this.giveItem(id, n);
     }
+    if (target.id === 'horrigan') {
+      this.flags.add('horriganDead');
+      this.advanceQuest('lastStand', 1);
+      this.ui.banner('ХОРРИГАН ПОВЕРЖЕН', 3);
+      this.ui.log('Гигант в чёрной броне рушится в пыль. Остатки отряда Анклава бегут к винтокрылу. Арройо выстоял! Поговори со Старейшиной.', 'good');
+      for (const a of this.actors.filter((x) => x.tag === 'enclaveAttack' && !x.dead)) {
+        // Бегущие уже не враги — бой заканчивается.
+        a.faction = 'villager';
+        this.removeFromLocation(a.id);
+      }
+      this.releaseAllies();
+    }
     if (target.id === 'darion') {
       this.advanceQuest('vault15', 1);
       this.ui.banner('ДАРИОН МЁРТВ', 2.5);
@@ -1613,6 +1626,52 @@ export class Game {
     }
   }
 
+  /** Воины Арройо встают рядом с героем. */
+  rallyDefenders() {
+    for (const a of this.actors) {
+      if (a.tag !== 'defender' || a.dead) continue;
+      a.faction = 'companion';
+      a.follow = this.player;
+      a.tag = 'warAlly';
+      a.wanderRadius = 0;
+    }
+  }
+
+  /** Последний бой: Хорриган и отряд Анклава высаживаются у южной тропы. */
+  startEnclaveAttack() {
+    this.flags.add('enclaveAttack');
+    this.closeDialogue();
+    placeVertibird(this.world);
+    spawnEnclaveSquad(this);
+    this.rallyDefenders();
+    audio.play('quest');
+    this.ui.banner('АНКЛАВ АТАКУЕТ', 3);
+    this.ui.log('С юга нарастает рёв двигателей. Винтокрыл садится у тропы, и из него выходит гигант в чёрной броне.', 'warn');
+    const h = this.actors.find((a) => a.id === 'horrigan');
+    if (h) this.ui.speech(h.pos, h.rig.height, 'Ты взорвал мою платформу, дикарь!', '#ff8070');
+    this.ui.log('Фрэнк Хорриган: «Ты взорвал мою платформу, дикарь. Теперь я сожгу твою деревню.»', 'bad');
+  }
+
+  /** Финал после последнего боя. */
+  finalEnding() {
+    this.flags.add('finalDone');
+    this.closeDialogue();
+    if (this.quests.lastStand) this.quests.lastStand.state = 'rewarded';
+    this.addXp(2000);
+    this.mode = 'menu';
+    this.ui.showHud(false);
+    audio.play('quest');
+    const slides = [
+      'Фрэнк Хорриган, последний агент Анклава, пал у порога Арройо. Винтокрыл без пилота так и остался ржаветь у южной тропы — дети племени играют в нём до сих пор.',
+      ...this.endingSlides().slice(1),
+    ];
+    this.ui.showEnding(slides, () => {
+      this.mode = 'explore';
+      this.ui.showHud(true);
+      this.ui.log('История Избранного завершена. Пустошь по-прежнему открыта.', 'good');
+    });
+  }
+
   /** Мутанты Марипосы нападают. */
   mutantsWar() {
     this.turnHostile(MARIPOSA_MUTANTS, 'mutantsHostile');
@@ -1726,6 +1785,11 @@ export class Game {
     this.flags.add('nrWarWon');
     this.ui.banner('НЬЮ-РИНО ВЗЯТ', 2.5);
     this.ui.log('Глава враждебной семьи убит. Вернись к своему боссу за наградой.', 'warn');
+    this.releaseAllies();
+  }
+
+  /** Временные союзники (война семей, защитники Арройо) возвращаются к мирной жизни. */
+  private releaseAllies() {
     for (const a of this.actors) {
       if (a.tag !== 'warAlly' || a.dead) continue;
       a.follow = null;

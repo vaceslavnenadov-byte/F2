@@ -4,7 +4,8 @@ import { jitter } from '../world';
 import { DESERT_PALETTE } from '../terrain';
 import type { LocationDef } from './types';
 import type { Game } from '../../game/game';
-import { brahmin, gecko, human, SKIN } from '../../game/bestiary';
+import { brahmin, enclaveSoldier, gecko, horrigan, human, SKIN } from '../../game/bestiary';
+import { vertibird } from '../props';
 
 const VILLAGE = { x: 0, z: 0 };
 const TEMPLE = { x: 0, z: -50 };
@@ -204,6 +205,82 @@ function buildNest(w: World) {
   w.place(skull, x - 3, z + 3, 0.7, -0.1);
 }
 
+/** Сад ГЭКК: зелёные грядки, молодые деревья, пруд и сам ГЭКК на каменном постаменте. */
+function buildGarden(w: World) {
+  const leaf = new THREE.MeshStandardMaterial({ color: '#4a7a2a', roughness: 0.85 });
+  const stalkGeo = new THREE.ConeGeometry(0.18, 1.2, 5);
+  stalkGeo.translate(0, 0.6, 0);
+  const fields: [number, number, number, number][] = [[-30, 18, 14, 5], [26, 22, 12, 4], [-28, -20, 10, 4]];
+  const m = new THREE.Matrix4();
+  const q = new THREE.Quaternion();
+  for (const [cx, cz, len, rows] of fields) {
+    const n = rows * Math.floor(len / 0.8);
+    const mesh = new THREE.InstancedMesh(stalkGeo, leaf, n);
+    let i = 0;
+    for (let r = 0; r < rows; r++) {
+      for (let k = 0; k < Math.floor(len / 0.8); k++) {
+        const x = cx - len / 2 + k * 0.8;
+        const z = cz - rows + r * 2;
+        q.setFromEuler(new THREE.Euler(0, k * 1.7, 0));
+        m.compose(new THREE.Vector3(x, w.y(x, z) - 0.05, z), q, new THREE.Vector3(1, 0.9 + ((r + k) % 4) * 0.12, 1));
+        mesh.setMatrixAt(i++, m);
+      }
+    }
+    mesh.castShadow = true;
+    w.group.add(mesh);
+  }
+  // Молодые деревья с зелёными кронами.
+  const crown = new THREE.MeshStandardMaterial({ color: '#3e6a2a', roughness: 0.9 });
+  for (const [x, z, s] of [[-22, -12, 1], [20, -14, 1.2], [-24, 28, 0.9], [22, 30, 1.1], [30, 4, 1], [-6, 26, 0.8]]) {
+    const t = new THREE.Group();
+    const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.12 * s, 0.18 * s, 2.2 * s, 6), w.mat.darkWood);
+    trunk.position.y = 1.1 * s;
+    const c = new THREE.Mesh(jitter(new THREE.IcosahedronGeometry(1.3 * s, 1), 0.25, 2, Math.floor(x * 7 + z)), crown);
+    c.position.y = 2.7 * s;
+    t.add(trunk, c);
+    t.traverse((o) => ((o as THREE.Mesh).isMesh ? (o.castShadow = true) : null));
+    w.place(t, x, z, x, 0.1);
+    w.nav.blockCircle(x, z, 0.5);
+  }
+  // Пруд, наполненный ГЭКК.
+  const pond = new THREE.Mesh(new THREE.CircleGeometry(4.5, 32), new THREE.MeshStandardMaterial({ color: '#2a5a6a', roughness: 0.08, metalness: 0.3 }));
+  pond.rotation.x = -Math.PI / 2;
+  pond.position.set(24, w.y(24, -2) + 0.06, -2);
+  w.group.add(pond);
+  w.nav.blockCircle(24, -2, 4.4);
+  for (let i = 0; i < 12; i++) {
+    const a = (i / 12) * Math.PI * 2;
+    const reed = new THREE.Mesh(new THREE.ConeGeometry(0.06, 1, 4), leaf);
+    reed.position.set(24 + Math.cos(a) * 4.7, w.y(24, -2) + 0.5, -2 + Math.sin(a) * 4.7);
+    w.group.add(reed);
+  }
+  // ГЭКК на постаменте у храма.
+  const ped = new THREE.Group();
+  const stone = new THREE.Mesh(jitter(new THREE.CylinderGeometry(0.8, 1, 1, 8), 0.05, 2, 9), w.mat.stone);
+  stone.position.y = 0.5;
+  const geck = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.6, 0.35), new THREE.MeshStandardMaterial({ color: '#c8b070', roughness: 0.5, metalness: 0.3 }));
+  geck.position.y = 1.3;
+  const glow = new THREE.PointLight(0xa0ff90, 5, 8);
+  glow.position.y = 2;
+  ped.add(stone, geck, glow);
+  w.place(ped, -6, -6, 0.3, 0);
+  w.nav.blockCircle(-6, -6, 1.1);
+}
+
+/** Винтокрыл Анклава, севший у южной тропы. */
+export function placeVertibird(w: World) {
+  w.place(vertibird(w), 10, 40, 0.6, 0);
+  w.nav.blockRect(10, 40, 2.4, 6.5, 0.6);
+}
+
+/** Отряд Хорригана: солдаты Анклава и сам агент. */
+export function spawnEnclaveSquad(g: Game) {
+  const add = g.spawn.bind(g);
+  const spots: [number, number][] = [[-3, 30], [3, 28], [-2, 38], [4, 36]];
+  spots.forEach(([x, z], i) => add(enclaveSoldier(`esquad${i}`, { faction: 'hostile', detectRadius: 60, tag: 'enclaveAttack' }), x, z, 0.6));
+  add(horrigan(), 1, 33, 0.9);
+}
+
 function buildDogSpot(w: World) {
   const { x, z } = DOG_SPOT;
   for (let i = 0; i < 5; i++) {
@@ -217,8 +294,41 @@ function buildDogSpot(w: World) {
   }
 }
 
+/** Племя вернулось, и ГЭКК превратил долину в сад. */
+function reborn(flags: Set<string>) {
+  return flags.has('rigDestroyed') && flags.has('tribeFreed');
+}
+
+function spawnReborn(g: Game) {
+  const add = g.spawn.bind(g);
+  add(human('elder', 'Старейшина', { skin: '#b0805e', cloth: '#5a3d2a', hair: '#d8d4cc', top: '#7a2e22', beard: true, scale: 0.96 }, 'staff', { dialogue: 'elderNew' }), 0, -11.5);
+  add(human('hakunin', 'Хакунин', { skin: SKIN.b, cloth: '#3e3428', hair: '#4a4a48', top: '#2f5a6a', beard: true }, 'staff', { dialogue: 'hakuninNew', wanderRadius: 2 }), 9, -4.5);
+  add(human('nagor', 'Нагор', { skin: '#c08a62', cloth: '#7b5a3c', hair: '#2a1a10' }, 'spear', { dialogue: 'arroyoNew', wanderRadius: 3, hp: 40, skill: 60, tag: 'defender' }), NAGOR_HOME.x, NAGOR_HOME.z);
+  const warrior = (id: string, name: string, x: number, z: number, look: Parameters<typeof human>[2]) =>
+    add(human(id, name, look, 'spear', { dialogue: 'arroyoNew', wanderRadius: 6, hp: 45, ac: 8, skill: 65, tag: 'defender', attack: { skill: 'melee', dmg: [5, 12], ap: 4, range: 2.2, melee: true, visual: 'spear' } }), x, z);
+  warrior('hunter1', 'Охотник', -5, -4, { skin: SKIN.b, cloth: '#5e4a36', hair: '#1e140c', build: 1.1 });
+  warrior('hunter2', 'Охотница', 12, 14, { skin: SKIN.a, cloth: '#6a4030', hair: '#2a1a10', top: '#8a5a3a', build: 0.9 });
+  warrior('warrior1', 'Воин', -10, 4, { skin: SKIN.c, cloth: '#5a4030', hair: '#1a1210', top: '#7a3a2a', build: 1.15 });
+  warrior('warrior2', 'Воин', 6, 6, { skin: SKIN.b, cloth: '#4a3a28', hair: '#2a1a10', build: 1.12 });
+  add(human('woman1', 'Жительница', { skin: '#b98260', cloth: '#7a6040', hair: '#20140c', top: '#9a7a4a', build: 0.88 }, 'none', { dialogue: 'arroyoNew', wanderRadius: 6 }), 6, 10);
+  add(human('woman2', 'Жительница', { skin: SKIN.a, cloth: '#6a5040', hair: '#3a2516', build: 0.86 }, 'none', { dialogue: 'arroyoNew', wanderRadius: 6 }), -24, 16);
+  add(human('kid', 'Ребёнок', { skin: SKIN.a, cloth: '#6e5038', hair: '#3a2516', scale: 0.62 }, 'none', { dialogue: 'arroyoNew', wanderRadius: 6, speed: 2.6 }), 3, 3.5);
+  add(human('kid2', 'Ребёнок', { skin: SKIN.b, cloth: '#5a4a30', hair: '#1a1210', scale: 0.58 }, 'none', { dialogue: 'arroyoNew', wanderRadius: 6, speed: 2.6 }), -3, 6);
+  for (let i = 0; i < 4; i++) add(brahmin(`brahmin${i}`), PEN.x - 3 + i * 2.5, PEN.z + (i % 2 ? 1 : -1), 0.9);
+  const dog = g.dog;
+  if (!dog.dead && !g.isInParty(dog) && g.quests.dog?.state === 'rewarded') add(dog, NAGOR_HOME.x - 1, NAGOR_HOME.z + 1);
+  if (g.flags.has('enclaveAttack') && !g.flags.has('horriganDead')) {
+    spawnEnclaveSquad(g);
+    g.rallyDefenders();
+  }
+}
+
 function spawn(g: Game) {
   const add = g.spawn.bind(g);
+  if (reborn(g.flags)) {
+    spawnReborn(g);
+    return;
+  }
   if (g.flags.has('arroyoRaided')) {
     // После налёта Анклава в деревне остался только раненый шаман.
     add(human('hakunin', 'Хакунин', { skin: SKIN.b, cloth: '#3e3428', hair: '#4a4a48', top: '#2f5a6a', beard: true }, 'staff', { dialogue: 'hakuninRaid' }), 2, 4);
@@ -282,7 +392,9 @@ export const ARROYO: LocationDef = {
     ],
   },
   build(w, flags) {
-    buildVillage(w, flags.has('arroyoRaided'));
+    buildVillage(w, flags.has('arroyoRaided') && !reborn(flags));
+    if (reborn(flags)) buildGarden(w);
+    if (flags.has('enclaveAttack')) placeVertibird(w);
     buildTemple(w);
     buildNest(w);
     buildDogSpot(w);
