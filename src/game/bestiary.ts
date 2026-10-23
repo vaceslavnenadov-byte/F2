@@ -176,6 +176,20 @@ export function cassidy(): Actor {
   });
 }
 
+/** Вик: старый торговец-радиомастер с пистолетом. */
+export function vic(): Actor {
+  return human('vic', 'Вик', { skin: SKIN.pale, cloth: '#4a4a3a', hair: '#6a6a60', top: '#5a5a48', beard: true, build: 0.95 }, 'gun', {
+    dialogue: 'vic', hp: 40, ap: 8, ac: 8, skill: 60, attack: ATTACKS.pistol, sequence: 7, speed: 3.2, dr: 0.1,
+  });
+}
+
+/** Горис: молодой разумный коготь смерти, книжник из Убежища 13. */
+export function goris(): Actor {
+  const a = deathclaw('goris', 'Горис', { dialogue: 'goris', hp: 110, ap: 10, skill: 80, xp: 0, sequence: 11 });
+  a.rig.root.scale.multiplyScalar(0.88);
+  return a;
+}
+
 /** Маркус: шериф Брокен-Хиллз, добродушный супермутант с пулемётом. */
 export function marcus(): Actor {
   return human('marcus', 'Маркус', { skin: '#74845a', cloth: '#4a3a28', hair: '#74845a', top: '#5a4632', build: 1.75, scale: 1.35 }, 'rifle', {
@@ -255,8 +269,8 @@ export function wanamingo(id: string, queen = false): Actor {
 /** Фрэнк Хорриган: агент Анклава, мутант-гигант в особой силовой броне. */
 export function horrigan(): Actor {
   return human('horrigan', 'Фрэнк Хорриган', { skin: '#2a2c30', cloth: '#1e2024', hair: '#2a2c30', build: 1.6, scale: 1.45, armor: 'power' }, 'rifle', {
-    faction: 'hostile', hp: 320, ap: 10, ac: 25, skill: 85, speed: 3.2, sequence: 10, xp: 3000, dt: 9, dr: 0.45,
-    attack: { skill: 'smallGuns', dmg: [16, 30], ap: 5, range: 16, melee: false, visual: 'rifle' },
+    faction: 'hostile', hp: 240, ap: 10, ac: 22, skill: 80, speed: 3.2, sequence: 10, xp: 3000, dt: 6, dr: 0.35,
+    attack: { skill: 'smallGuns', dmg: [14, 26], ap: 5, range: 16, melee: false, visual: 'rifle' },
     detectRadius: 60, wanderRadius: 0, tag: 'enclaveAttack', loot: [['microcell', 20, 30], ['stimpak', 3, 3]],
   });
 }

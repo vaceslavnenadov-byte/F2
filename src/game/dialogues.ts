@@ -463,7 +463,7 @@ export const DIALOGUES: Record<string, DialogueDef> = {
   },
 
   vic: {
-    start: (g) => (g.flags.has('vicFree') ? (g.flags.has('vicTalked') ? 'after' : 'free') : 'caged'),
+    start: (g) => (g.isJoined('vic') ? 'party' : g.flags.has('vicFree') ? (g.flags.has('vicTalked') ? 'after' : 'free') : 'caged'),
     nodes: {
       caged: {
         text: 'Эй, ты! Ты из Арройо? По одежде вижу. Вытащи меня отсюда — поговори с Мецгером. Я в долгу не останусь.',
@@ -494,7 +494,18 @@ export const DIALOGUES: Record<string, DialogueDef> = {
       },
       after: {
         text: 'Береги себя в дороге. Я ещё немного побуду в Дэне, а потом — домой.',
-        options: [{ text: 'Удачи, Вик.', next: null }],
+        options: [
+          { text: 'Пойдёшь со мной, Вик? Руки мастера в дороге пригодятся.', next: 'join' },
+          { text: 'Удачи, Вик.', next: null },
+        ],
+      },
+      join: {
+        text: 'С тобой? Хм… Домой я всегда успею, а вот такого приключения больше не будет. Ладно! Починю всё, что сломается, — от рации до мотора. Пистолет у меня есть.',
+        options: [{ text: 'Добро пожаловать, Вик.', action: (g) => g.recruit('vic'), next: null }],
+      },
+      party: {
+        text: 'Отвёртка при мне, пистолет тоже. Что чиним, командир?',
+        options: [...partyOptions(), { text: 'Пока ничего. Идём.', next: null }],
       },
     },
   },

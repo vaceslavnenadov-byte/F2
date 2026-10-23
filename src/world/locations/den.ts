@@ -109,7 +109,7 @@ function spawn(g: Game) {
   add(human('metzger', 'Мецгер', { skin: SKIN.pale, cloth: '#2a2622', hair: '#2a1a10', top: '#3a1a14', beard: true, build: 1.2 }, 'gun', { dialogue: 'metzger' }), GUILD.x, GUILD.z + 6);
   add(human('slaver1', 'Работорговец', { skin: SKIN.b, cloth: '#2a2622', hair: '#141010', top: '#4a2a1a', build: 1.1 }, 'spear', { dialogue: 'slaver', wanderRadius: 2 }), GUILD.x - 5, GUILD.z + 6);
   if (!g.flags.has('vicFree')) add(human('vic', 'Вик', { skin: SKIN.pale, cloth: '#4a4a3a', hair: '#6a6a60', top: '#5a5a48', beard: true, build: 0.95 }, 'none', { dialogue: 'vic' }), CAGE.x, CAGE.z);
-  else if (!g.flags.has('vicLeft')) add(human('vic', 'Вик', { skin: SKIN.pale, cloth: '#4a4a3a', hair: '#6a6a60', top: '#5a5a48', beard: true, build: 0.95 }, 'none', { dialogue: 'vic', wanderRadius: 3 }), CAGE.x + 3, CAGE.z + 3);
+  else if (!g.flags.has('vicLeft') && !g.isJoined('vic')) add(human('vic', 'Вик', { skin: SKIN.pale, cloth: '#4a4a3a', hair: '#6a6a60', top: '#5a5a48', beard: true, build: 0.95 }, 'none', { dialogue: 'vic', wanderRadius: 3 }), CAGE.x + 3, CAGE.z + 3);
   add(human('becky', 'Бекки', { skin: SKIN.b, cloth: '#5a3a3a', hair: '#1a1210', top: '#7a3a4a', build: 0.95 }, 'none', { dialogue: 'becky' }), -20, 9);
   const junk: [number, number][] = [[-8, 2], [5, 10], [20, -4], [-30, 0]];
   junk.forEach(([x, z], i) =>

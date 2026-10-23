@@ -1,4 +1,5 @@
 import type { DialogueDef } from './dialogues';
+import { partyOptions } from './dialogues_ch4';
 
 function pick(lines: string[]) {
   return lines[Math.floor(Math.random() * lines.length)];
@@ -6,6 +7,33 @@ function pick(lines: string[]) {
 
 /** Глава VII: новый Арройо и последний бой. */
 export const CH7_DIALOGUES: Record<string, DialogueDef> = {
+  goris: {
+    start: (g) => (g.isJoined('goris') ? 'party' : 'hello'),
+    nodes: {
+      hello: {
+        text: '*Коготь смерти поменьше остальных отрывается от толстой книги.* О. Человек. Не бойся — я Горис. Читаю дневники людей Убежища. ' +
+          'Удивительно, сколько вы написали о мире, которого больше нет. Мне хочется увидеть тот, что есть.',
+        options: [
+          { text: 'Хочешь пойти со мной? Увидишь пустошь своими глазами.', cond: (g) => g.flags.has('clawsAllow'), next: 'join' },
+          { text: 'Что ты читаешь?', next: 'book' },
+          { text: 'Мне пора.', next: null },
+        ],
+      },
+      book: {
+        text: '«Справочник по садоводству в условиях подземного проживания». Очень грустная книга: ни одно растение так и не выросло.',
+        options: [{ text: 'Понимаю.', next: 'hello' }],
+      },
+      join: {
+        text: 'С тобой? Грах будет ворчать… но Грах всегда ворчит. Да. Я пойду. Когти у меня острые, а люди редко стреляют в того, кто вежливо здоровается. Ну, иногда.',
+        options: [{ text: 'Идём, Горис.', action: (g) => g.recruit('goris'), next: null }],
+      },
+      party: {
+        text: 'Горис слушает. Куда дальше? Я веду записи — получится хорошая книга.',
+        options: [...partyOptions(), { text: 'Идём дальше.', next: null }],
+      },
+    },
+  },
+
   elderNew: {
     start: (g) => {
       if (g.flags.has('finalDone')) return 'after';

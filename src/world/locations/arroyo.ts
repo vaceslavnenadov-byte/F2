@@ -276,8 +276,9 @@ export function placeVertibird(w: World) {
 /** Отряд Хорригана: солдаты Анклава и сам агент. */
 export function spawnEnclaveSquad(g: Game) {
   const add = g.spawn.bind(g);
-  const spots: [number, number][] = [[-3, 30], [3, 28], [-2, 38], [4, 36]];
-  spots.forEach(([x, z], i) => add(enclaveSoldier(`esquad${i}`, { faction: 'hostile', detectRadius: 60, tag: 'enclaveAttack' }), x, z, 0.6));
+  const spots: [number, number][] = [[-3, 30], [3, 28], [-2, 38]];
+  // Отряд потрёпан взрывом платформы: броня латаная, людей мало.
+  spots.forEach(([x, z], i) => add(enclaveSoldier(`esquad${i}`, { name: 'Солдат Анклава', faction: 'hostile', detectRadius: 60, tag: 'enclaveAttack', hp: 60, skill: 60, dt: 4, dr: 0.3 }), x, z, 0.6));
   add(horrigan(), 1, 33, 0.9);
 }
 
@@ -305,7 +306,7 @@ function spawnReborn(g: Game) {
   add(human('hakunin', 'Хакунин', { skin: SKIN.b, cloth: '#3e3428', hair: '#4a4a48', top: '#2f5a6a', beard: true }, 'staff', { dialogue: 'hakuninNew', wanderRadius: 2 }), 9, -4.5);
   add(human('nagor', 'Нагор', { skin: '#c08a62', cloth: '#7b5a3c', hair: '#2a1a10' }, 'spear', { dialogue: 'arroyoNew', wanderRadius: 3, hp: 40, skill: 60, tag: 'defender' }), NAGOR_HOME.x, NAGOR_HOME.z);
   const warrior = (id: string, name: string, x: number, z: number, look: Parameters<typeof human>[2]) =>
-    add(human(id, name, look, 'spear', { dialogue: 'arroyoNew', wanderRadius: 6, hp: 45, ac: 8, skill: 65, tag: 'defender', attack: { skill: 'melee', dmg: [5, 12], ap: 4, range: 2.2, melee: true, visual: 'spear' } }), x, z);
+    add(human(id, name, look, 'spear', { dialogue: 'arroyoNew', wanderRadius: 6, hp: 70, ac: 14, skill: 68, dt: 2, dr: 0.2, tag: 'defender', attack: { skill: 'melee', dmg: [5, 12], ap: 4, range: 2.2, melee: true, visual: 'spear' } }), x, z);
   warrior('hunter1', 'Охотник', -5, -4, { skin: SKIN.b, cloth: '#5e4a36', hair: '#1e140c', build: 1.1 });
   warrior('hunter2', 'Охотница', 12, 14, { skin: SKIN.a, cloth: '#6a4030', hair: '#2a1a10', top: '#8a5a3a', build: 0.9 });
   warrior('warrior1', 'Воин', -10, 4, { skin: SKIN.c, cloth: '#5a4030', hair: '#1a1210', top: '#7a3a2a', build: 1.15 });

@@ -18,7 +18,7 @@ import { Inventory, ITEMS, TRADERS, priceMult, itemPrice } from './items';
 import { Combat, BODY_PARTS, AIM_AP, type BodyPart } from './combat';
 import { DIALOGUES, resolveText, type DialogueDef, type DialogueOption } from './dialogues';
 import { QUESTS, QUEST_GOALS, type QuestState } from './quests';
-import { dog as makeDog, sulik as makeSulik, cassidy as makeCassidy, marcus as makeMarcus, colonel } from './bestiary';
+import { dog as makeDog, sulik as makeSulik, cassidy as makeCassidy, marcus as makeMarcus, vic as makeVic, goris as makeGoris, colonel } from './bestiary';
 import { OIL_RIG, RIG_DOCK, RIG_SOLDIERS } from '../world/locations/oilrig';
 import { highwayman } from '../world/props';
 import { SIERRA_GUARDS } from '../world/locations/sierra';
@@ -609,10 +609,16 @@ export class Game {
 
   recruitSulik() { this.recruit('sulik'); }
 
+  /** Ремонт с учётом Вика в отряде: старый радиомастер чинит что угодно. */
+  repairSkill() {
+    const own = this.char.skill('repair');
+    return this.party.some((a) => a.id === 'vic') ? Math.max(own, 75) : own;
+  }
+
   // ─── Отряд ─────────────────────────────────────────────────────────────────
 
   /** Нанимаемые спутники: создаются один раз и живут между локациями. */
-  private companionFactories: Record<string, () => Actor> = { sulik: makeSulik, cassidy: makeCassidy, marcus: makeMarcus };
+  private companionFactories: Record<string, () => Actor> = { sulik: makeSulik, cassidy: makeCassidy, marcus: makeMarcus, vic: makeVic, goris: makeGoris };
   private companionActors = new Map<string, Actor>();
 
   private joinedFlag(id: string) { return id === 'sulik' ? 'sulikJoined' : `joined:${id}`; }
@@ -1218,8 +1224,8 @@ export class Game {
         break;
       case 'sierraGenerator':
         if (this.flags.has('sierraPower')) this.ui.log('Генератор гудит ровно.');
-        else if (this.char.skill('repair') >= 50 || this.inv.count('microcell') >= 2) {
-          const bySkill = this.char.skill('repair') >= 50;
+        else if (this.repairSkill() >= 50 || this.inv.count('microcell') >= 2) {
+          const bySkill = this.repairSkill() >= 50;
           if (!bySkill) this.inv.remove('microcell', 2);
           this.flags.add('sierraPower');
           this.advanceQuest('sierra', 1);
@@ -1246,7 +1252,7 @@ export class Game {
       case 'brokenCar':
         if (this.flags.has('carOwned')) break;
         if (!this.inv.count('injector')) this.ui.log('Старый «Хайвеймен». Двигатель цел, но сгорел топливный инжектор. Смитти говорит, такой можно найти на армейском складе Сьерра.', 'warn');
-        else if (this.char.skill('repair') >= 50) {
+        else if (this.repairSkill() >= 50) {
           this.ui.log('Вы ставите новый инжектор и подключаете проводку. Мотор кашляет — и оживает! [Ремонт]', 'good');
           this.fixCar(false);
         } else this.ui.log('Инжектор есть, но самому не справиться (Ремонт 50). Попроси Смитти.', 'warn');
@@ -1337,7 +1343,7 @@ export class Game {
       case 'reactorPanel':
         if (this.flags.has('reactorFixed')) this.ui.log('Индикаторы горят зелёным. Реактор работает ровно.');
         else if (!this.inv.count('regulator')) this.ui.log('Пульт мигает красным. Регулятор потока выгорел — нужна новая деталь.', 'warn');
-        else if (this.char.skill('repair') >= 60) {
+        else if (this.repairSkill() >= 60) {
           this.ui.log('Вы сами меняете регулятор потока. Стрелки приборов ползут в зелёную зону. [Ремонт]', 'good');
           this.fixReactor(true);
         } else this.ui.log('Слишком сложно без навыка (Ремонт 60). Отдай деталь Скиту.', 'warn');
@@ -1532,6 +1538,8 @@ export class Game {
     if (f.has('sulikJoined') && !f.has('sulikDead')) fates.push('Сулик вернулся в своё племя с рассказами о походах. Дедушка, говорят, одобрил.');
     if (f.has('vicFree')) fates.push('Вик открыл лавку в Убежище-Сити и до старости торговал с племенем Арройо.');
     if (this.isJoined('cassidy') && !f.has('cassidyDead')) fates.push('Кэссиди так и не бросил пить, но сердце его пережило ещё много дорог.');
+    if (this.isJoined('vic') && !f.has('vicDead')) fates.push('Вик так и не открыл лавку: дорога с Избранным оказалась интереснее. Его радиоприёмники ловили музыку по всей пустоши.');
+    if (this.isJoined('goris') && !f.has('gorisDead')) fates.push('Горис вернулся в Убежище 13 и стал летописцем своего народа. Его книга о путешествии с человеком начинается словами: «Он не испугался».');
     if (this.isJoined('marcus') && !f.has('marcusDead')) fates.push('Маркус вернулся в Брокен-Хиллз и до конца дней оставался его шерифом.');
     if (fates.length) slides.push(fates.join(' '));
     slides.push(f.has('reactorFixed')
@@ -1644,6 +1652,8 @@ export class Game {
     placeVertibird(this.world);
     spawnEnclaveSquad(this);
     this.rallyDefenders();
+    this.giveItem('stimpak', 3);
+    this.ui.log('Хакунин суёт тебе в руки три стимулятора: «Духи любят живых».', 'good');
     audio.play('quest');
     this.ui.banner('АНКЛАВ АТАКУЕТ', 3);
     this.ui.log('С юга нарастает рёв двигателей. Винтокрыл садится у тропы, и из него выходит гигант в чёрной броне.', 'warn');

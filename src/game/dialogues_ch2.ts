@@ -231,7 +231,7 @@ export const CH2_DIALOGUES: Record<string, DialogueDef> = {
         text: 'Это он! Давай сюда — поставлю за пару минут.',
         options: [
           { text: 'Держи.', action: (g) => g.fixReactor(false), next: 'thanks' },
-          { text: 'Я поставлю сам.', check: '[Ремонт 60]', cond: (g) => g.char.skill('repair') >= 60, next: 'self' },
+          { text: 'Я поставлю сам.', check: '[Ремонт 60]', cond: (g) => g.repairSkill() >= 60, next: 'self' },
         ],
       },
       self: {

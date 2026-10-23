@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import type { World } from '../world';
 import type { LocationDef } from './types';
 import type { Game } from '../../game/game';
-import { deathclaw } from '../../game/bestiary';
+import { deathclaw, goris } from '../../game/bestiary';
 import { vaultDoor } from './vaultcity';
 
 const EXIT = { x: -46, z: 0, r: 3 };
@@ -156,6 +156,8 @@ function spawn(g: Game) {
   add(mk('claw1', 'Коготь смерти', 'deathclaw'), -12, -14, 0.8);
   add(mk('claw2', 'Коготь смерти', 'deathclaw'), -2, 14, 0.8);
   add(mk('claw3', 'Коготь смерти', 'deathclaw'), 18, 9, 0.8);
+  // Горис читает в кабинете смотрителя, пока его не позовут в дорогу.
+  if (!hostile && !g.isJoined('goris')) add(goris(), 22, -8, 0.8);
 }
 
 export const VAULT13: LocationDef = {
