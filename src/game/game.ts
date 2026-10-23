@@ -9,7 +9,7 @@ import type { Cell } from '../world/nav';
 import { heightAt } from '../world/terrain';
 import { LOCATIONS, WORLD_MAP } from '../world/locations';
 import { ARROYO, NAGOR_HOME } from '../world/locations/arroyo';
-import { makeEncounter, ENCOUNTER_NAMES, type EncounterKind } from '../world/locations/encounter';
+import { makeEncounter, ENCOUNTER_NAMES, SPECIAL_ENCOUNTERS, type EncounterKind } from '../world/locations/encounter';
 import type { LocationDef } from '../world/locations/types';
 import { Actor } from '../entities/actor';
 import { HumanoidRig, LizardRig, QuadrupedRig } from '../entities/rigs';
@@ -23,6 +23,7 @@ import { OIL_RIG, RIG_DOCK, RIG_SOLDIERS } from '../world/locations/oilrig';
 import { highwayman } from '../world/props';
 import { SIERRA_GUARDS } from '../world/locations/sierra';
 import { KHAN_IDS } from '../world/locations/vault15';
+import { MARIPOSA_MUTANTS } from '../world/locations/mariposa';
 import { HATCH, SLAG_IDS, spawnKarl, spawnSlags } from '../world/locations/modoc';
 import { NAVARRO_SOLDIERS } from '../world/locations/navarro';
 import { MORELLI_IDS, CARVER_IDS } from '../world/locations/newreno';
@@ -330,7 +331,10 @@ export class Game {
         this.days = days;
         this.ui.hideScreen();
         const roll = Math.random();
-        const kind: EncounterKind = roll < 0.35 ? 'geckos' : roll < 0.6 ? 'rats' : roll < 0.9 ? 'bandits' : 'quiet';
+        const specials = SPECIAL_ENCOUNTERS.filter((k) => !this.flags.has(`seen_${k}`));
+        let kind: EncounterKind = roll < 0.32 ? 'geckos' : roll < 0.54 ? 'rats' : roll < 0.8 ? 'bandits' : roll < 0.92 ? 'caravan' : 'quiet';
+        if (specials.length && Math.random() < 0.12) kind = specials[Math.floor(Math.random() * specials.length)];
+        this.flags.add(`seen_${kind}`);
         this.encounterInfo = { kind, seed: Math.floor(Math.random() * 1e6) };
         this.enterLocation(makeEncounter(kind, this.encounterInfo.seed), 'world');
         this.mode = 'explore';
@@ -848,6 +852,7 @@ export class Game {
       const d = Math.hypot(this.player.pos.x - z.x, this.player.pos.z - z.z);
       if (d < z.r) rate += z.rate * (1 - (d / z.r) * 0.5);
     }
+    if (this.location.id === 'mariposa' && this.flags.has('fevDestroyed')) rate = 0;
     if (rate <= 0) return;
     if (this.days < this.radxUntil) rate *= 0.5;
     if (this.char.has('radResist')) rate *= 0.5;
@@ -1134,6 +1139,39 @@ export class Game {
     const sci = this.char.skill('science');
     const card = this.inv.count('keycard') > 0;
     switch (it.id) {
+      case 'fevConsole':
+        if (this.flags.has('fevDestroyed')) {
+          this.ui.log('Пульт мёртв. Чаны пусты.');
+          break;
+        }
+        if (this.actors.some((a) => MARIPOSA_MUTANTS.includes(a.id) && !a.dead && a.faction === 'hostile' && a.distanceTo(this.player) < 14)) {
+          this.ui.log('Мутанты рядом — не до пульта!', 'warn');
+          break;
+        }
+        this.destroyVats(sci >= 60);
+        break;
+      case 'mariposaLocker':
+        this.flags.add('mariposaLocker');
+        this.giveItem('plasmaRifle', 1);
+        this.giveItem('microcell', 20);
+        this.giveItem('stimpak', 2);
+        this.ui.log('В шкафчике — плазменная винтовка в армейской смазке. Кто-то очень берёг её восемьдесят лет.', 'good');
+        this.removeFromWorld('mariposaLocker');
+        break;
+      case 'whale':
+        if (this.flags.has('whaleLooted')) {
+          this.ui.log('Кит. В пустыне. Лучше не думать об этом.');
+          break;
+        }
+        this.flags.add('whaleLooted');
+        this.giveItem('jerky', 6);
+        this.giveItem('caps', 120);
+        this.addXp(250);
+        this.ui.log('Кит лежит посреди пустыни, будто упал с неба. В его пасти застряла чья-то сумка с крышками. Китовое мясо тоже сгодится.', 'good');
+        break;
+      case 'petunias':
+        this.ui.log('Разбитый горшок с петуниями. Кажется, он подумал: «О нет, только не опять».');
+        break;
       case 'kokoweef':
         this.enterLocation(LOCATIONS.kokoweef, 'world');
         this.ui.log('Вы отдираете доски и спускаетесь в штольню. Пахнет сыростью и чем-то кислым.', 'warn');
@@ -1491,6 +1529,9 @@ export class Game {
       : 'В войне семей Луиджи Морелли пал. Карвер правил Нью-Рино железной рукой и помнил, кому обязан короной.');
     else if (f.has('sidedMorelli')) slides.push('Без бухгалтерии Карвер быстро пал. Нью-Рино стал вотчиной семьи Морелли — и ещё на шаг ближе к тому, чтобы стать столицей пороков всей пустоши.');
     else if (f.has('sidedCarver')) slides.push('Семья Карвер вернула свои книги и вытеснила Морелли. Новый порядок в Нью-Рино оказался ничуть не лучше старого.');
+    if (f.has('fevDestroyed')) slides.push(f.has('mutantsLeft')
+      ? 'Чаны Марипосы уничтожены, а надзиратель Гор с братьями осел в Брокен-Хиллз. Новой армии мутантов не будет — только новые соседи.'
+      : 'Чаны ВРЭ на базе Марипоса уничтожены. Мечта Мастера о новой армии умерла вместе с ними.');
     if (f.has('v15Squatters')) slides.push('Сквоттеры обжили Убежище 15 и вычистили его до блеска. Через десять лет там вырос городок, а на стене атриума висит твой портрет рядом с портретом Танди.');
     else if (f.has('v15NCR')) slides.push('Убежище 15 стало госпиталем и складом Республики. НКР росла — и дороги севера стали безопаснее.');
     if (f.has('ncrRanger')) slides.push('Рейнджеры Пустоши ещё долго рассказывали новобранцам о рейнджере из Арройо, который не отступал перед злом.');
@@ -1570,6 +1611,62 @@ export class Game {
       if (this.quests.boxing) this.quests.boxing.state = 'rewarded';
       this.ui.banner('ЧЕМПИОН НЬЮ-РИНО', 2.5);
     }
+  }
+
+  /** Мутанты Марипосы нападают. */
+  mutantsWar() {
+    this.turnHostile(MARIPOSA_MUTANTS, 'mutantsHostile');
+  }
+
+  /** Гор уводит мутантов в Брокен-Хиллз. */
+  mutantsLeave() {
+    this.flags.add('mutantsLeft');
+    this.closeDialogue();
+    for (const id of MARIPOSA_MUTANTS) this.removeFromLocation(id);
+    this.addXp(800);
+    this.addKarma(20);
+    this.ui.log('Мутанты уходят на восток, к Брокен-Хиллз. Путь к чанам свободен.', 'good');
+  }
+
+  /** Уничтожение чанов ВРЭ: аккуратно (Наука) или грубо — разбить и надышаться. */
+  destroyVats(clean: boolean) {
+    this.flags.add('fevDestroyed');
+    for (const o of this.world.group.children) {
+      o.traverse((c) => {
+        if (c.name === 'fev') c.visible = false;
+        if (c.name === 'fevGlow') (c as THREE.PointLight).intensity = 0;
+      });
+    }
+    if (clean) this.ui.log('Вы запускаете цикл стерилизации. Чаны вскипают, вирус гибнет при трёхстах градусах. [Наука]', 'good');
+    else {
+      this.char.rads += 60;
+      this.ui.log('Пароль не подобрать — вы разбиваете стекло чанов. Зелёная жижа хлещет на пол, воздух звенит от радиации (+60 рад).', 'bad');
+      for (const a of this.actors) if (MARIPOSA_MUTANTS.includes(a.id) && !a.dead && a.faction === 'hostile') a.detectRadius = 40;
+    }
+    this.ui.banner('ЧАНЫ ВРЭ УНИЧТОЖЕНЫ', 2.5);
+    this.advanceQuest('mariposa', 1);
+    if (this.quests.mariposa) this.quests.mariposa.state = 'rewarded';
+    this.addXp(clean ? 1500 : 1000);
+    this.addKarma(30);
+    this.ui.updateHud();
+  }
+
+  /** Хранитель моста сам не знает ответа — и летит в пропасть. */
+  bridgeWin() {
+    this.closeDialogue();
+    this.ui.log('— Что? Я… я не знаю! — Хранителя моста подбрасывает в воздух, и он с воплем исчезает в пропасти.', 'good');
+    this.removeFromLocation('keeper');
+    this.addXp(500);
+    this.giveItem('caps', 150);
+    this.giveItem('stimpak', 1);
+    this.ui.log('На краю моста остался его мешок: крышки и стимулятор.', 'good');
+  }
+
+  bridgeFail() {
+    this.closeDialogue();
+    this.ui.log('Неведомая сила подбрасывает вас в воздух и швыряет на камни у края пропасти!', 'bad');
+    const keeper = this.actors.find((a) => a.id === 'keeper');
+    if (keeper) this.damage(this.player, 15, keeper);
   }
 
   /** Ханы нападают. */

@@ -15,6 +15,7 @@ import { REDDING } from './redding';
 import { KOKOWEEF } from './kokoweef';
 import { NCR } from './ncr';
 import { VAULT15 } from './vault15';
+import { MARIPOSA } from './mariposa';
 import type { LocationDef } from './types';
 
 export const LOCATIONS: Record<string, LocationDef> = {
@@ -35,6 +36,7 @@ export const LOCATIONS: Record<string, LocationDef> = {
   kokoweef: KOKOWEEF,
   ncr: NCR,
   vault15: VAULT15,
+  mariposa: MARIPOSA,
 };
 
 /** Положение городов на карте мира (условные единицы 0..100). */
@@ -53,6 +55,7 @@ export const WORLD_MAP: Record<string, { x: number; y: number; label: string; de
   redding: { x: 27, y: 37, label: 'Реддинг', desc: 'Шахтёрский город, живущий золотом.' },
   ncr: { x: 78, y: 72, label: 'НКР', desc: 'Новая Калифорнийская Республика — самое большое государство пустоши.' },
   vault15: { x: 88, y: 60, label: 'Убежище 15', desc: 'Полуразрушенное убежище. Здесь живут сквоттеры и бесчинствуют ханы.' },
+  mariposa: { x: 34, y: 63, label: 'База Марипоса', desc: 'Военная база, где Мастер выращивал супермутантов в чанах ВРЭ.' },
   modoc: { x: 47, y: 29, label: 'Модок', desc: 'Фермерский городок: брамины, кожи и ферма с призраками.' },
 };
 

@@ -164,6 +164,7 @@ export const TRADERS: Record<string, { name: string; stock: [string, number][] }
   marge: { name: 'Марж Лабарж', stock: [['caps', 600], ['ammo10', 50], ['ammo223', 30], ['shells', 30], ['stimpak', 4], ['jerky', 6], ['huntingRifle', 1]] },
   rangers: { name: 'Арсенал рейнджеров', stock: [['caps', 900], ['huntingRifle', 1], ['assaultRifle', 1], ['ammo223', 80], ['ammo5', 60], ['ammo10', 60], ['stimpak', 4]] },
   buster: { name: 'Торговец Бастер', stock: [['caps', 700], ['jerky', 10], ['stimpak', 6], ['radaway', 3], ['ammo10', 40], ['shells', 30], ['leatherArmor', 1], ['knife', 2]] },
+  caravan: { name: 'Караванщик Крэйн', stock: [['caps', 600], ['stimpak', 4], ['radaway', 2], ['jerky', 8], ['ammo10', 40], ['ammo223', 30], ['shells', 20], ['microcell', 10], ['metalArmor', 1]] },
   rico: { name: 'Контрабандист Рико', stock: [['caps', 700], ['fakePapers', 1], ['ammo5', 60], ['microcell', 12], ['stimpak', 6], ['radaway', 2], ['leatherArmor', 1]] },
   betty: { name: 'Бетти', stock: [['caps', 400], ['shells', 40], ['shotgun', 1], ['radaway', 3], ['radx', 3], ['stimpak', 3], ['leatherArmor', 1]] },
   renoBar: { name: 'Бар «Подкова»', stock: [['caps', 500], ['shells', 30], ['ammo10', 40], ['stimpak', 4], ['pistol10', 1], ['knife', 2]] },

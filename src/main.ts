@@ -1,6 +1,7 @@
 import './style.css';
 import { Game } from './game/game';
 import { LOCATIONS } from './world/locations';
+import { makeEncounter } from './world/locations/encounter';
 
 const game = new Game(document.getElementById('app')!);
 
@@ -21,3 +22,4 @@ if (!(slot && game.loadFromStorage(slot))) showMenu();
 // Доступ из консоли для отладки.
 (window as unknown as { game: Game }).game = game;
 (window as unknown as { LOCS: typeof LOCATIONS }).LOCS = LOCATIONS;
+(window as unknown as { makeEnc: typeof makeEncounter }).makeEnc = makeEncounter;

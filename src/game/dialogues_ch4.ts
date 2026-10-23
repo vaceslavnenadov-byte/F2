@@ -381,6 +381,7 @@ export const CH4_DIALOGUES: Record<string, DialogueDef> = {
   marcus: {
     start: (g) => {
       if (g.isJoined('marcus')) return 'party';
+      if (g.quests.scorpions?.state === 'rewarded') return 'after';
       if (g.quests.scorpions?.state === 'done') return 'thanks';
       if (g.quests.scorpions) return 'waiting';
       return 'hello';
@@ -397,7 +398,25 @@ export const CH4_DIALOGUES: Record<string, DialogueDef> = {
       },
       story: {
         text: 'Когда-то я служил в армии Мастера. Потом армия кончилась, а я — нет. Решил, что лучше строить, чем ломать. Город — моя идея.',
-        options: [{ text: 'Достойно.', next: 'hello' }],
+        options: [{ text: 'Откуда вообще взялись супермутанты?', cond: (g) => !g.quests.mariposa, next: 'fev' }, { text: 'Достойно.', next: 'hello' }],
+      },
+      fev: {
+        text: 'Вирус ВРЭ. Мастер окунал людей в чаны на военной базе Марипоса, к западу отсюда, — так получились мы. Мастер мёртв, но я слышал, что на базе снова кто-то есть. ' +
+          'Если чаны снова работают — будет новая армия. Сходи туда. А лучше — возьми меня: мутанты скорее выслушают своего.',
+        options: [
+          {
+            text: 'Я разберусь с чанами.',
+            action: (g) => {
+              g.startQuest('mariposa');
+              g.discover('mariposa');
+            },
+            next: null,
+          },
+        ],
+      },
+      after: {
+        text: 'Шахта работает, город сыт. Спасибо тебе ещё раз.',
+        options: [{ text: 'Откуда вообще взялись супермутанты?', cond: (g) => !g.quests.mariposa, next: 'fev' }, { text: 'Пока, шериф.', next: null }],
       },
       waiting: {
         text: 'Радскорпионы всё ещё у входа в шахту, на северо-востоке. Бей в голову — панцирь крепкий.',
@@ -431,7 +450,7 @@ export const CH4_DIALOGUES: Record<string, DialogueDef> = {
       },
       party: {
         text: 'Маркус готов. Говори, куда.',
-        options: [...partyOptions(), { text: 'Идём дальше.', next: null }],
+        options: [...partyOptions(), { text: 'Откуда вообще взялись супермутанты?', cond: (g) => !g.quests.mariposa, next: 'fev' }, { text: 'Идём дальше.', next: null }],
       },
     },
   },
