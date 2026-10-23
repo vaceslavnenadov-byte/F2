@@ -527,6 +527,7 @@ export class UI {
           <div class="row"><span>Координаты</span><span class="v">${g.player.pos.x.toFixed(0)}, ${g.player.pos.z.toFixed(0)}</span></div>
           <div class="row"><span>Карма</span><span class="v">${g.karma} · ${esc(g.karmaTitle)}</span></div>
           <div class="row"><span>Радиация</span><span class="v">${Math.round(g.char.rads)} рад${g.char.radPenalty ? ` (−${g.char.radPenalty} ОД)` : ''}</span></div>
+          <div class="row"><span>Химия</span><span class="v">${esc(g.chemStatus() || 'чисто')}</span></div>
           <div class="row"><span>Убито врагов</span><span class="v">${g.kills}</span></div>
           <h3 style="margin-top:12px">Заметки</h3>
           <div>${esc(LOCATION_NOTES[g.location.id] ?? 'Опасная пустошь. Уйти можно через любой край карты.')}</div>

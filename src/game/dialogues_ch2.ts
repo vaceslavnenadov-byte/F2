@@ -162,7 +162,7 @@ export const CH2_DIALOGUES: Record<string, DialogueDef> = {
           { text: 'Покажи лекарства.', action: (g) => g.openTrade('vcdoctor'), next: null },
           {
             text: 'Вылечите меня полностью (50 крышек).',
-            cond: (g) => g.inv.count('caps') >= 50 && (g.char.hp < g.char.maxHp || g.char.rads > 0),
+            cond: (g) => g.inv.count('caps') >= 50 && g.needsDoctor,
             action: (g) => g.doctorHeal(50),
             next: 'healed',
           },

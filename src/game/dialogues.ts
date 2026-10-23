@@ -28,7 +28,7 @@ export interface DialogueDef {
   nodes: Record<string, DialogueNode>;
 }
 
-const dumb = (g: Game) => g.char.special.in <= 3;
+const dumb = (g: Game) => g.char.eff.in <= 3;
 const smart = (g: Game) => !dumb(g);
 
 function rewardGeckos(g: Game, bonus: boolean) {

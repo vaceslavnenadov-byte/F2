@@ -13,7 +13,7 @@ import { makeEncounter, ENCOUNTER_NAMES, SPECIAL_ENCOUNTERS, type EncounterKind 
 import type { LocationDef } from '../world/locations/types';
 import { Actor } from '../entities/actor';
 import { HumanoidRig, LizardRig, QuadrupedRig } from '../entities/rigs';
-import { Character, PERKS, type PerkId, type SkillId } from './character';
+import { Character, CHEMS, PERKS, type ChemId, type PerkId, type SkillId } from './character';
 import { Inventory, ITEMS, TRADERS, priceMult, itemPrice } from './items';
 import { Combat, BODY_PARTS, AIM_AP, type BodyPart } from './combat';
 import { DIALOGUES, resolveText, type DialogueDef, type DialogueOption } from './dialogues';
@@ -486,6 +486,8 @@ export class Game {
     }
     if (!d || d.v !== 2) return false;
     this.char = Character.fromJSON(d.char);
+    this.chemState = null;
+    this.char.updateChems(d.days);
     this.inv = Inventory.fromJSON(d.inv);
     this.quests = d.quests;
     this.flags = new Set(d.flags);
@@ -796,6 +798,10 @@ export class Game {
   useItem(id: string) {
     const def = ITEMS[id];
     if (!this.inv.count(id)) return;
+    if (id in CHEMS) {
+      this.useChem(id as ChemId);
+      return;
+    }
     if (id === 'radaway' || id === 'radx') {
       if (id === 'radaway' && this.char.rads <= 0) {
         this.ui.log('Радиации в организме нет.');
@@ -840,6 +846,62 @@ export class Game {
   }
 
   /** Лучевая болезнь меняет максимум ОД. */
+  /** Химия: временный бонус и риск зависимости. */
+  private useChem(id: ChemId) {
+    const chem = CHEMS[id];
+    if (this.mode === 'combat' && (!this.combat || !this.combat.spendPlayerAp(ITEMS[id].useAp ?? 2))) {
+      this.ui.log('Сейчас нельзя: не ваш ход или мало ОД.', 'warn');
+      return;
+    }
+    this.inv.remove(id);
+    this.char.chemUntil[id] = this.days + chem.hours / 24;
+    this.ui.log(`${chem.name}: ${chem.desc} на ${chem.hours} ч.`, 'good');
+    if (Math.random() < chem.addict) {
+      this.char.addictUntil[id] = this.days + 7;
+      this.ui.log(`Вы чувствуете тягу к препарату «${chem.name}». Похоже на зависимость: когда действие кончится, начнётся ломка. Лечится неделей воздержания или у доктора.`, 'bad');
+    }
+    audio.play('heal');
+    this.tickChems();
+    if (this.mode === 'combat' && chem.ap) this.player.ap += chem.ap;
+    this.ui.updateHud();
+  }
+
+  private chemState: string | null = null;
+
+  /** Следит за окончанием действия химии и ломкой. */
+  private tickChems() {
+    const { active, withdrawal } = this.char.updateChems(this.days);
+    const key = `${active.join(',')}|${withdrawal.join(',')}`;
+    if (key === this.chemState) return;
+    if (this.chemState !== null) {
+      const [pa, pw] = this.chemState.split('|').map((s) => (s ? s.split(',') : []));
+      for (const c of pa) if (!active.includes(c as ChemId)) this.ui.log(`${CHEMS[c as ChemId].name} перестаёт действовать.`, 'warn');
+      for (const c of withdrawal) if (!pw.includes(c)) this.ui.log(`Ломка (${CHEMS[c].name}): руки дрожат, мысли путаются. Характеристики снижены.`, 'bad');
+      for (const c of pw) if (!withdrawal.includes(c as ChemId) && !active.includes(c as ChemId)) this.ui.log(`Ломка (${CHEMS[c as ChemId].name}) прошла.`, 'good');
+    }
+    this.chemState = key;
+    this.player.maxAp = this.char.maxAp;
+    this.player.hp = this.char.hp;
+    if (this.mode !== 'combat') this.player.ap = this.char.maxAp;
+    this.ui.updateHud();
+  }
+
+  /** Строка для Пип-Боя: действующая химия и ломки. */
+  chemStatus() {
+    const parts: string[] = [];
+    for (const c of Object.keys(CHEMS) as ChemId[]) {
+      const until = this.char.chemUntil[c] ?? -1;
+      if (until > this.days) parts.push(`${CHEMS[c].name} (${Math.ceil((until - this.days) * 24 * 60)} мин)`);
+      else if ((this.char.addictUntil[c] ?? -1) > this.days) parts.push(`ломка: ${CHEMS[c].name}`);
+    }
+    return parts.join(', ');
+  }
+
+  /** Есть ли что лечить у доктора: раны, радиация или зависимость. */
+  get needsDoctor() {
+    return this.char.hp < this.char.maxHp || this.char.rads > 0 || Object.values(this.char.addictUntil).some((d) => (d ?? -1) > this.days);
+  }
+
   private syncAp() {
     this.player.maxAp = this.char.maxAp;
     if (this.mode !== 'combat') this.player.ap = this.char.maxAp;
@@ -1395,6 +1457,9 @@ export class Game {
     this.player.hp = this.char.hp;
     this.char.rads = 0;
     this.radWarned = 0;
+    if (Object.values(this.char.addictUntil).some((d) => (d ?? -1) > this.days)) this.ui.log('Доктор выводит химию из крови. Зависимость прошла.', 'good');
+    this.char.addictUntil = {};
+    this.tickChems();
     audio.play('heal');
     this.syncAp();
   }
@@ -1580,7 +1645,7 @@ export class Game {
   /** Кости в «Десятке»: шанс выигрыша растёт с Удачей. */
   gamble(bet: number) {
     if (this.inv.count('caps') < bet) return;
-    const chance = 0.42 + (this.char.special.lk - 5) * 0.03 + (this.char.has('lucky') ? 0.05 : 0);
+    const chance = 0.42 + (this.char.eff.lk - 5) * 0.03 + (this.char.has('lucky') ? 0.05 : 0);
     const win = Math.random() < chance;
     const d6 = () => 1 + Math.floor(Math.random() * 6);
     let mine = [d6(), d6()];
@@ -1638,6 +1703,8 @@ export class Game {
   rallyDefenders() {
     for (const a of this.actors) {
       if (a.tag !== 'defender' || a.dead) continue;
+      // Без оружия ИИ пропускает ход — даём хотя бы копьё.
+      a.attack ??= { skill: 'melee', dmg: [4, 10], ap: 4, range: 2.2, melee: true, visual: 'spear' };
       a.faction = 'companion';
       a.follow = this.player;
       a.tag = 'warAlly';
@@ -2154,6 +2221,7 @@ export class Game {
       return;
     }
     this.location.update?.(this, dt);
+    this.tickChems();
     this.chatter(dt);
 
     this.regenAcc += dt;

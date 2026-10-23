@@ -152,7 +152,7 @@ export class Combat {
     if (attacker.crippled.has('arm')) chance -= 20;
     if (isPlayer && !w.melee && g.char.has('sniper')) chance += 15;
     if (!w.melee) {
-      const pe = isPlayer ? g.char.special.pe : 5;
+      const pe = isPlayer ? g.char.eff.pe : 5;
       chance -= Math.max(0, attacker.distanceTo(target) - pe * 1.5) * 4;
     }
     return clamp(Math.round(chance), 5, 95);

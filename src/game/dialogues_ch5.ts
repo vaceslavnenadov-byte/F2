@@ -307,7 +307,7 @@ export const CH5_DIALOGUES: Record<string, DialogueDef> = {
           { text: 'Я достану образец.', cond: (g) => !g.quests.sample, action: (g) => g.startQuest('sample'), next: null },
           {
             text: 'Подлечите меня (50 крышек).',
-            cond: (g) => g.inv.count('caps') >= 50 && (g.char.hp < g.char.maxHp || g.char.rads > 0),
+            cond: (g) => g.inv.count('caps') >= 50 && g.needsDoctor,
             action: (g) => g.doctorHeal(50),
             next: null,
           },
